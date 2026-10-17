@@ -13,7 +13,7 @@ normal images only, which gives a finite-sample, distribution-free guarantee
 distribution shift** (illumination, blur, noise, JPEG) for three detectors on
 **VisA**: a feature-distance baseline, PatchCore and DINOv2-kNN.
 
-> **TL;DR: status: Phase 0 of 6 (skeleton only). No experiments have been run yet,
+> **TL;DR: status: Phase 0 of phases 0–5 done (skeleton only). No experiments have been run yet,
 > so this README contains no results.** Every number that appears here later will
 > come from a real run, with mean ± std over seeds. This is a reproduction plus
 > extension of existing work, not a novelty claim (see [Prior work](docs/PRIOR_WORK.md)).
@@ -85,8 +85,9 @@ Known up front; the list will grow as results come in.
 - **Small-sample limits are real.** A non-trivial conformal threshold at α = 1% needs
   ≥ 99 calibration normals (≥ 299 for a 95%-confidence PAC guarantee). Recalibration with
   fewer shifted normals cannot certify α = 1%.
-- **Closest prior work not yet read.** arXiv:2608.15090 and arXiv:2608.18585 could not be
-  accessed from the development environment; see [docs/PRIOR_WORK.md](docs/PRIOR_WORK.md).
+- **Two possibly related papers are not yet read.** arXiv:2608.15090 and arXiv:2608.18585 could not
+  be accessed from the development environment; they are to be read by the author, and no
+  claim here relies on them. See [docs/PRIOR_WORK.md](docs/PRIOR_WORK.md).
 
 ## Reproducibility
 
@@ -134,7 +135,7 @@ data/                 VisA on the laptop only, git-ignored
 
 ## Roadmap
 
-See [ROADMAP.md](ROADMAP.md). Phase 0 (skeleton, CI, prior work) is in review.
+See [ROADMAP.md](ROADMAP.md): six phases (0–5). Phase 0 (skeleton, CI, prior work) is done.
 
 ## References
 
