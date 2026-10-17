@@ -115,3 +115,21 @@ def test_gaussian_blur_and_maps():
 def test_is_oom():
     assert is_oom(RuntimeError("CUDA out of memory. Tried to allocate"))
     assert not is_oom(RuntimeError("shape mismatch"))
+
+
+def test_fast_coreset_selects_the_same_set_as_the_exact_version():
+    """The expansion-based distance update picks the same points as the direct one."""
+    import math
+
+    feats = 5.0 + torch.randn(3000, 64, generator=torch.Generator().manual_seed(4))
+    gen = torch.Generator().manual_seed(7)
+    proj = torch.randn(64, 16, generator=gen) / math.sqrt(16)
+    pts = feats @ proj
+    start = int(torch.randint(3000, (1,), generator=gen))
+    sel, md = [start], ((pts - pts[start]) ** 2).sum(1)
+    for _ in range(99):  # reference: exact distances, materialised differences
+        nxt = int(torch.argmax(md))
+        sel.append(nxt)
+        md = torch.minimum(md, ((pts - pts[nxt]) ** 2).sum(1))
+    fast = greedy_coreset(feats, 100, seed=7, proj_dim=16)
+    assert set(fast.tolist()) == set(sel)

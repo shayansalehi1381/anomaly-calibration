@@ -82,10 +82,23 @@ class PatchCoreScorer(TorchScorer):
             raise ValueError("cannot fit on zero images")
         s = self.settings
         t0 = time.perf_counter()
-        # All memory patches live in CPU RAM (up to ~3 GB for 900 images); only the
-        # selected coreset is moved to the GPU.
-        parts = self.map_batches(images, lambda b: self.embed(b).flatten(0, 1).cpu())
-        all_patches = torch.cat(parts)
+        # All memory patches live in CPU RAM (up to ~2.9 GB for 905 images x 784 patches x
+        # 1024 floats); only the selected coreset goes to the GPU. The buffer is allocated
+        # once: collecting per-batch pieces and concatenating would briefly need 2x RAM.
+        all_patches: torch.Tensor | None = None
+        offset = 0
+
+        def collect(batch: np.ndarray) -> None:
+            nonlocal all_patches, offset
+            f = self.embed(batch).flatten(0, 1).cpu()
+            if all_patches is None:
+                per_image = f.shape[0] // len(batch)
+                all_patches = torch.empty(len(images) * per_image, f.shape[1])
+            all_patches[offset : offset + f.shape[0]] = f
+            offset += f.shape[0]
+
+        self.map_batches(images, collect)
+        assert all_patches is not None and offset == all_patches.shape[0]
         self._timed("fit_features", t0)
 
         t0 = time.perf_counter()
@@ -98,6 +111,7 @@ class PatchCoreScorer(TorchScorer):
             bank_size=int(self.bank.shape[0]),
             grid=list(self.grid),
         )
+        del all_patches  # free the CPU buffer before scoring
 
     def _patch_distances(self, batch: np.ndarray) -> torch.Tensor:
         feats = self.embed(batch)  # (n, P, D)

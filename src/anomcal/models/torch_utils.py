@@ -145,12 +145,22 @@ def greedy_coreset(
     start_idx = int(torch.randint(n, (1,), generator=gen))
     selected = torch.empty(n_select, dtype=torch.long, device=device)
     selected[0] = start_idx
+    # Distances to a new centre c via ||p||^2 - 2 p.c + ||c||^2: one pass over the points
+    # (a matrix-vector product) instead of materialising (points - c)^2, which is ~3x
+    # less memory traffic per iteration. The float32 cancellation that forced the exact
+    # re-rank in nn_sq_distances does not matter here: the greedy step compares LARGE
+    # distances (it looks for the farthest point), where the relative error is tiny.
+    sq_norms = (points * points).sum(1)
+
+    def sq_dist_to(idx):
+        return (sq_norms - 2.0 * (points @ points[idx]) + sq_norms[idx]).clamp_min_(0)
+
     # min_dist[i] = squared distance from point i to its closest selected point so far.
-    min_dist = ((points - points[start_idx]) ** 2).sum(1)
+    min_dist = sq_dist_to(start_idx)
     for i in range(1, n_select):
         nxt = torch.argmax(min_dist)  # the point farthest from the current coreset
         selected[i] = nxt  # no .item(): avoids a GPU->CPU sync on every iteration
-        min_dist = torch.minimum(min_dist, ((points - points[nxt]) ** 2).sum(1))
+        torch.minimum(min_dist, sq_dist_to(nxt), out=min_dist)
     return selected.cpu()
 
 
