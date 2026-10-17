@@ -58,3 +58,32 @@ jobs:
           pip install -e ".[plots,dev]"
       - name: Offline test suite
         run: python -m pytest -q
+
+  # The model code (baseline, PatchCore, DINOv2-kNN) is tested with CPU-only torch and
+  # tiny seeded random backbones; real architectures are built with random weights.
+  # Nothing is downloaded except the torch wheels themselves.
+  test-torch:
+    name: tests with torch CPU (${{ matrix.os }}, Python 3.12)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install CPU torch (same version as the laptop) + package
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch==2.14.1 torchvision==0.29.1 --index-url https://download.pytorch.org/whl/cpu
+          pip install -e ".[gpu,plots,dev]"
+      - name: Torch, torchvision and timm import (so the torch tests run instead of skipping)
+        run: python -c "import torch, torchvision, timm; print(torch.__version__, timm.__version__)"
+      - name: Torch-dependent tests
+        run: python -m pytest -q -rs tests/test_torch_utils.py tests/test_backbones.py tests/test_torch_scorers.py tests/test_extract_torch.py
+      - name: Full offline test suite
+        run: python -m pytest -q
