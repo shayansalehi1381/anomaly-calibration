@@ -135,13 +135,14 @@ def check_device(device: str) -> None:
 
 
 def plan_jobs(cfg: ExtractConfig, classes: Sequence[str]) -> list[Job]:
+    """Class is the OUTER loop, so each class's images are decoded only once."""
     shifted = conditions(cfg.corruptions, cfg.levels)
     jobs = []
-    for protocol in cfg.protocols:
-        conds = tuple(shifted) if protocol == "calib" else (("none", 0),)
-        for method in cfg.methods:
-            for seed in cfg.seeds:
-                for cls in classes:
+    for cls in classes:
+        for protocol in cfg.protocols:
+            conds = tuple(shifted) if protocol == "calib" else (("none", 0),)
+            for method in cfg.methods:
+                for seed in cfg.seeds:
                     jobs.append(Job(protocol, method, seed, cls, conds))
     return jobs
 
@@ -184,16 +185,27 @@ def save_split_manifest(run_dir: Path, split: ClassSplit) -> None:
 
 
 class ClassData:
-    """Images of one class loaded once and shared by all methods/seeds/conditions."""
+    """Decoded images of ONE class, cached so that every image is read from disk once.
 
-    def __init__(self, root: Path, records: Sequence[VisaRecord], size: int, workers: int):
-        self.root, self.size, self.workers = root, size, workers
-        self.by_id = {r.image_id: r for r in records}
+    Jobs run class by class (see :func:`plan_jobs`), so all seeds, protocols and methods
+    of a class reuse the same decoded arrays. At 256 px a class needs at most about
+    1,100 x 196 KB = 220 MB of RAM; the cache is dropped when the next class starts.
+    """
+
+    def __init__(
+        self, root: Path, cls: str, records: Sequence[VisaRecord], size: int, workers: int
+    ):
+        self.root, self.cls, self.size, self.workers = root, cls, size, workers
+        self.by_id = {r.image_id: r for r in records if r.cls == cls}
+        self._cache: dict[str, np.ndarray] = {}
 
     def load(self, ids: Sequence[str]) -> np.ndarray:
-        return load_images(
-            [self.by_id[i].image_path(self.root) for i in ids], self.size, self.workers
-        )
+        missing = [i for i in dict.fromkeys(ids) if i not in self._cache]
+        if missing:
+            paths = [self.by_id[i].image_path(self.root) for i in missing]
+            for i, img in zip(missing, load_images(paths, self.size, self.workers), strict=True):
+                self._cache[i] = img
+        return np.stack([self._cache[i] for i in ids])
 
 
 def score_condition(
@@ -278,7 +290,7 @@ def estimate_runtime(
     seeded per item or per job), so it cannot change any result.
     """
     first = work[0][0]
-    data = ClassData(root, records, cfg.image_size, cfg.num_workers)
+    data = ClassData(root, first.cls, records, cfg.image_size, cfg.num_workers)
     split = make_split(records, first.cls, "calib", first.seed, cfg.memory_fraction)
     ids = list(split.memory[: cfg.warmup_images])
     t0 = time.perf_counter()
@@ -304,12 +316,17 @@ def estimate_runtime(
 
     total = 0.0
     n_units = 0
+    to_load: dict[str, set[str]] = {}  # images are decoded once per class (ClassData cache)
     for job, todo in work:
-        n_mem, n_eval = eval_size(cfg, records, job)
-        total += (n_mem + n_eval) * t_load + n_mem * t_fit[job.method]
+        split = make_split(records, job.cls, job.protocol, job.seed, cfg.memory_fraction)
+        split = split.limited(cfg.max_images)
+        to_load.setdefault(job.cls, set()).update(split.memory, split.eval_ids)
+        n_mem, n_eval = len(split.memory), len(split.eval_ids)
+        total += n_mem * t_fit[job.method]
         for corruption, _ in todo:
             total += n_eval * (t_corrupt[corruption] + t_score[job.method])
             n_units += n_eval
+    total += t_load * sum(len(ids) for ids in to_load.values())
     return {
         "seconds": total,
         "image_condition_units": n_units,
@@ -461,15 +478,11 @@ def run(cfg: ExtractConfig) -> dict:
     pbar = tqdm(total=total_units, unit="img", disable=cfg.no_progress, dynamic_ncols=True)
     entry["status"] = "interrupted"
     try:
-        data_cache: dict[str, ClassData] = {}
+        data: ClassData | None = None
         for job, todo in work:
             pbar.set_description(f"{job.protocol}/{job.method}/s{job.seed}/{job.cls}")
-            data = data_cache.setdefault(
-                job.cls,
-                ClassData(
-                    root, [r for r in records if r.cls == job.cls], cfg.image_size, cfg.num_workers
-                ),
-            )
+            if data is None or data.cls != job.cls:  # new class: drop the previous cache
+                data = ClassData(root, job.cls, records, cfg.image_size, cfg.num_workers)
             written += run_job(cfg, job, records, data, todo, pbar)
         entry["status"] = "complete"
     finally:

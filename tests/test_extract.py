@@ -285,3 +285,31 @@ def test_script_wrapper_runs(fake_visa_root, tmp_path, repo_root):
     )
     assert res.returncode == 0, res.stderr
     assert "estimated time" in res.stdout and "done:" in res.stdout
+
+
+def test_jobs_run_class_by_class(fake_visa_root):
+    from anomcal.extract import plan_jobs
+
+    cfg = cfg_for(fake_visa_root, "unused", seeds=[0, 1])
+    order = [j.cls for j in plan_jobs(cfg, ["candle", "pcb1"])]
+    assert order == sorted(order) and order[0] == "candle"  # all candle jobs, then pcb1
+
+
+def test_each_image_is_decoded_once_per_run(fake_visa_root, tmp_path, monkeypatch):
+    """3 seeds x 2 protocols must not re-read the same JPEGs (the per-class cache)."""
+    from collections import Counter
+
+    loads: Counter = Counter()
+    real = ex.load_images
+
+    def counting(paths, size, workers):
+        loads.update(str(p) for p in paths)
+        return real(paths, size, workers)
+
+    monkeypatch.setattr(ex, "load_images", counting)
+    cfg = cfg_for(fake_visa_root, tmp_path, seeds=[0, 1, 2], warmup_images=2)
+    run(cfg)
+    n_images = 2 * (12 + 4 + 4)
+    assert len(loads) == n_images  # every image was needed by some job
+    # each image once in the run, plus at most the 2 warm-up images a second time
+    assert sum(loads.values()) <= n_images + cfg.warmup_images
