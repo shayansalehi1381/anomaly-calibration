@@ -354,6 +354,46 @@ def stability(
     return pd.DataFrame(out)
 
 
+def paired_stability(pc: pd.DataFrame, n_boot: int = N_BOOT, grid: str = "all") -> pd.DataFrame:
+    """Paired method differences in RMS excess FAR, with a class-bootstrap interval.
+
+    Per (setting, kind, alpha) and method pair (a, b): diff = rms_excess(a) - rms_excess(b)
+    (negative = a is closer to the target). Each bootstrap replicate resamples the classes ONCE
+    and recomputes both methods on that same resample, so the interval is for the *difference*
+    and uses the correlation between methods (a non-paired comparison of two marginal
+    intervals is wider and less informative). Same coverage and limits as
+    :func:`class_bootstrap`: it covers which classes were drawn, nothing else.
+    """
+    levels = GRIDS[grid]
+    sh = pc[pc["corruption"] != "none"]
+    if levels is not None:
+        sh = sh[sh["severity"].isin(levels)]
+    rows = []
+    for (setting, kind, alpha), g in sh.groupby(["setting", "kind", "alpha"]):
+        sq = {}
+        for m, gm in g.groupby("method"):
+            gm = gm.assign(sq=gm["excess"] ** 2)
+            piv = gm.pivot_table(index=["corruption", "severity"], columns="class", values="sq")
+            sq[m] = piv.to_numpy()
+        n_cls = next(iter(sq.values())).shape[1]
+        idx = item_rng("phase4-boot-stab", n_cls).integers(0, n_cls, size=(n_boot, n_cls))
+        rms = {m: np.sqrt(v[:, idx].mean(axis=(0, 2))) for m, v in sq.items()}  # (n_boot,)
+        point = {m: float(np.sqrt(v.mean())) for m, v in sq.items()}
+        for a, b in (("dinov2_knn", "patchcore"), ("dinov2_knn", "baseline"),
+                     ("patchcore", "baseline")):  # fmt: skip
+            if a not in rms or b not in rms:
+                continue
+            d = rms[a] - rms[b]
+            lo, hi = np.percentile(d, [2.5, 97.5])
+            rows.append({
+                "grid": grid, "setting": setting, "kind": kind, "alpha": alpha,
+                "method_a": a, "method_b": b, "diff": point[a] - point[b],
+                "diff_lo": lo, "diff_hi": hi, "excludes_zero": bool(lo > 0 or hi < 0),
+                "share_boot_a_better": float((d < 0).mean()),
+            })  # fmt: skip
+    return pd.DataFrame(rows)
+
+
 def _by_prefix(rows):
     groups: dict[tuple, list] = {}
     for setting, kind, alpha, method, piv in rows:
@@ -573,7 +613,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     pc = per_class(exp)
     hl = headline(pc, args.boot)
     stab = pd.concat([stability(pc, exp, args.boot, g) for g in GRIDS], ignore_index=True)
+    paired = pd.concat([paired_stability(pc, args.boot, g) for g in GRIDS], ignore_index=True)
     outputs = {
+        "paired_stability.csv": paired,
         "experiments.csv": exp,
         "per_class.csv": pc,
         "headline.csv": hl,

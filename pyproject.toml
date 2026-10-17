@@ -26,6 +26,8 @@ plots = ["matplotlib>=3.8"]
 # CUDA build of torch first, see README "Runs on laptop with GPU".
 gpu = ["torch>=2.4", "torchvision>=0.19", "timm>=1.0"]
 dev = ["pytest>=8.0", "ruff>=0.5"]
+# Re-execute notebooks/results.ipynb headless: jupyter nbconvert --execute
+notebook = ["nbformat>=5.9", "nbconvert>=7.0", "ipykernel>=6.0", "matplotlib>=3.8"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -45,3 +47,6 @@ target-version = "py310"
 [tool.ruff.lint]
 # pyflakes, pycodestyle errors, import sorting, bugbear, pyupgrade
 select = ["F", "E", "I", "B", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+"scripts/make_results_summary.py" = ["E501"]  # long markdown f-strings with check comments
