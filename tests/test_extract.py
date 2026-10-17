@@ -1,0 +1,287 @@
+"""End-to-end tests of the extraction pipeline on the fake dataset (CPU, dummy scorer)."""
+
+import importlib.util
+import json
+
+import pandas as pd
+import pytest
+
+import anomcal.extract as ex
+from anomcal.extract import ExtractConfig, config_from_args, main, run
+from anomcal.scores_io import validate
+
+N_CONDITIONS_3 = 1 + 4 * 3  # clean + 4 families x 3 levels
+
+
+def cfg_for(root, out, **kw) -> ExtractConfig:
+    # 64 px keeps the suite fast; the pipeline is resolution-agnostic.
+    base = dict(
+        data_root=root, device="cpu", out_dir=out, seeds=[0], no_progress=True, image_size=64
+    )
+    base.update(kw)
+    return ExtractConfig(**base)
+
+
+def chunks(run_dir):
+    return sorted(
+        p.relative_to(run_dir).as_posix() for p in (run_dir / "chunks").rglob("*.parquet")
+    )
+
+
+def consolidated(run_dir, name="calib_dummy_seed0.parquet") -> pd.DataFrame:
+    return pd.read_parquet(run_dir / "scores" / name)
+
+
+@pytest.fixture
+def full_run(fake_visa_root, tmp_path):
+    cfg = cfg_for(fake_visa_root, tmp_path / "out")
+    entry = run(cfg)
+    return cfg, entry
+
+
+def test_full_run_writes_every_chunk(full_run):
+    cfg, entry = full_run
+    assert entry["status"] == "complete"
+    names = chunks(cfg.run_dir)
+    # 2 classes x 13 calib conditions + 2 classes x 1 official (clean) condition
+    assert len(names) == 2 * N_CONDITIONS_3 + 2
+    assert sum("chunks/official/" in n for n in names) == 2
+    assert all(n.endswith("none_s0.parquet") for n in names if "/official/" in n)
+    assert cfg.run_dir.name == "full"
+
+
+def test_scores_follow_schema_and_cover_eval_sets(full_run, fake_records):
+    cfg, _ = full_run
+    df = consolidated(cfg.run_dir)
+    validate(df.astype({"seed": "int32"}))
+    # per class: held-out = 6 train leftovers + 4 test normals; anomalies = 4
+    per_cond = df.groupby(["class", "corruption", "severity"]).size()
+    assert (per_cond == 14).all() and len(per_cond) == 2 * N_CONDITIONS_3
+    official = consolidated(cfg.run_dir, "official_dummy_seed0.parquet")
+    assert set(official["official_split"]) == {"test"} and len(official) == 2 * 8
+
+
+def test_no_memory_image_is_ever_scored(full_run):
+    """Leakage check on the actual outputs, using the saved split manifests."""
+    cfg, _ = full_run
+    scored = consolidated(cfg.run_dir)
+    for cls in ("candle", "pcb1"):
+        manifest = json.loads(
+            (cfg.run_dir / "splits" / "calib" / "seed0" / f"{cls}.json").read_text()
+        )
+        memory = set(manifest["memory"])
+        assert memory and not memory & set(scored.loc[scored["class"] == cls, "image_id"])
+        assert set(manifest["heldout_normal"]).isdisjoint(manifest["anomaly"])
+
+
+def test_run_meta_records_settings(full_run):
+    cfg, _ = full_run
+    meta = json.loads((cfg.run_dir / "run_meta.json").read_text())[-1]
+    assert meta["levels"] == [1, 3, 5]
+    assert meta["severity_parameters"]["gaussian_blur"]["levels"] == {"1": 1, "3": 3, "5": 6}
+    assert meta["environment"]["device"] == "cpu" and "pillow" in meta["environment"]
+    assert meta["fingerprint"]["memory_fraction"] == 0.5
+    assert meta["estimate"]["seconds"] >= 0
+
+
+def test_rerun_is_a_noop(full_run, capsys):
+    cfg, _ = full_run
+    entry = run(cfg)
+    assert entry["status"] == "nothing to do"
+    assert "nothing left to do" in capsys.readouterr().out
+
+
+def test_resume_after_interruption_gives_identical_results(fake_visa_root, tmp_path, monkeypatch):
+    reference_cfg = cfg_for(fake_visa_root, tmp_path / "ref", classes=["candle"])
+    run(reference_cfg)
+
+    cfg = cfg_for(fake_visa_root, tmp_path / "resumed", classes=["candle"])
+    real_write = ex.write_atomic
+    calls = {"n": 0}
+
+    def write_then_crash(df, path):
+        calls["n"] += 1
+        if calls["n"] == 5:
+            raise KeyboardInterrupt  # Ctrl+C in the middle of the run
+        real_write(df, path)
+
+    monkeypatch.setattr(ex, "write_atomic", write_then_crash)
+    with pytest.raises(KeyboardInterrupt):
+        run(cfg)
+    assert len(chunks(cfg.run_dir)) == 4
+    meta = json.loads((cfg.run_dir / "run_meta.json").read_text())
+    assert meta[-1]["status"] == "interrupted"
+
+    monkeypatch.setattr(ex, "write_atomic", real_write)
+    entry = run(cfg)
+    assert entry["chunks_written"] == N_CONDITIONS_3 + 1 - 4
+    pd.testing.assert_frame_equal(consolidated(cfg.run_dir), consolidated(reference_cfg.run_dir))
+
+
+def test_cli_interrupt_returns_130(fake_visa_root, tmp_path, monkeypatch, capsys):
+    def crash(*a, **k):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(ex, "run_job", crash)
+    rc = main(["--data-root", str(fake_visa_root), "--device", "cpu", "--out", str(tmp_path)])
+    assert rc == 130 and "resume" in capsys.readouterr().out
+
+
+def test_stale_tmp_file_is_not_counted_as_done(fake_visa_root, tmp_path):
+    cfg = cfg_for(fake_visa_root, tmp_path / "o", classes=["candle"], protocols=["official"])
+    stale = cfg.run_dir / "chunks/official/dummy/seed0/candle/none_s0.parquet.tmp"
+    stale.parent.mkdir(parents=True)
+    stale.write_bytes(b"half-written")
+    assert run(cfg)["chunks_written"] == 1
+
+
+def test_results_are_deterministic_across_runs(fake_visa_root, tmp_path):
+    a = cfg_for(fake_visa_root, tmp_path / "a", classes=["pcb1"])
+    b = cfg_for(fake_visa_root, tmp_path / "b", classes=["pcb1"])
+    run(a)
+    run(b)
+    pd.testing.assert_frame_equal(consolidated(a.run_dir), consolidated(b.run_dir))
+
+
+def test_adding_severities_later_computes_only_new_levels(fake_visa_root, tmp_path):
+    cfg3 = cfg_for(fake_visa_root, tmp_path / "o", classes=["candle"], protocols=["calib"])
+    run(cfg3)
+    before = {p: (cfg3.run_dir / p).read_bytes() for p in chunks(cfg3.run_dir)}
+    cfg5 = cfg_for(
+        fake_visa_root, tmp_path / "o", classes=["candle"], protocols=["calib"], n_severities=5
+    )
+    entry = run(cfg5)
+    assert entry["chunks_written"] == 4 * 2  # levels 2 and 4 for each of the 4 families
+    after = chunks(cfg5.run_dir)
+    assert {p for p in after if p not in before} == {
+        f"chunks/calib/dummy/seed0/candle/{c}_s{lv}.parquet"
+        for c in ("brightness", "gaussian_blur", "gaussian_noise", "jpeg_compression")
+        for lv in (2, 4)
+    }
+    assert all((cfg5.run_dir / p).read_bytes() == b for p, b in before.items())  # untouched
+
+
+def test_changed_settings_refuse_to_resume(fake_visa_root, tmp_path, capsys):
+    run(cfg_for(fake_visa_root, tmp_path, classes=["candle"], protocols=["official"]))
+    with pytest.raises(RuntimeError, match="mix two experiments"):
+        run(cfg_for(fake_visa_root, tmp_path, classes=["candle"], memory_fraction=0.6))
+    args = ["--data-root", str(fake_visa_root), "--device", "cpu", "--out", str(tmp_path)]
+    assert main([*args, "--image-size", "128", "--classes", "candle"]) == 2
+    assert "mix two experiments" in capsys.readouterr().err
+
+
+def test_max_images_smoke_mode(fake_visa_root, tmp_path):
+    cfg = cfg_for(fake_visa_root, tmp_path, max_images=3, classes=["candle"])
+    run(cfg)
+    assert cfg.run_dir.name == "smoke_max3"
+    df = consolidated(cfg.run_dir)
+    sizes = df.groupby(["corruption", "severity", "role"]).size()
+    assert (sizes == 3).all()  # 3 held-out normals + 3 anomalies per condition
+    manifest = json.loads((cfg.run_dir / "splits/calib/seed0/candle.json").read_text())
+    assert len(manifest["memory"]) == 3 and manifest["max_images"] == 3
+
+
+def test_estimate_only_writes_no_scores(fake_visa_root, tmp_path, capsys):
+    cfg = cfg_for(fake_visa_root, tmp_path, estimate_only=True)
+    entry = run(cfg)
+    assert entry["status"] == "estimate only" and not (cfg.run_dir / "chunks").exists()
+    assert "estimated time" in capsys.readouterr().out
+    assert entry["estimate"]["image_condition_units"] == 2 * N_CONDITIONS_3 * 14 + 2 * 8
+
+
+def test_config_file_and_cli_override(fake_visa_root, tmp_path):
+    conf = tmp_path / "c.json"
+    conf.write_text(
+        json.dumps(
+            {
+                "data_root": str(fake_visa_root),
+                "device": "cpu",
+                "seeds": [1, 2],
+                "classes": ["candle"],
+                "batch_size": 4,
+            }
+        )  # fmt: skip
+    )
+    cfg = config_from_args(["--config", str(conf), "--batch-size", "2", "--severities", "5"])
+    assert cfg.seeds == [1, 2] and cfg.batch_size == 2 and cfg.levels == (1, 2, 3, 4, 5)
+    assert cfg.data_root == fake_visa_root
+    cfg = config_from_args(["--config", str(conf), "--severity-levels", "2", "4"])
+    assert cfg.levels == (2, 4)
+
+
+def test_required_and_unknown_options(fake_visa_root, tmp_path):
+    with pytest.raises(SystemExit, match="device"):
+        config_from_args(["--data-root", str(fake_visa_root)])
+    with pytest.raises(SystemExit, match="data-root"):
+        config_from_args(["--device", "cpu"])
+    conf = tmp_path / "c.json"
+    conf.write_text(json.dumps({"data_root": "x", "device": "cpu", "typo_key": 1}))
+    with pytest.raises(SystemExit, match="typo_key"):
+        config_from_args(["--config", str(conf)])
+
+
+def test_device_must_be_valid(fake_visa_root, tmp_path):
+    with pytest.raises(ValueError, match="--device"):
+        run(cfg_for(fake_visa_root, tmp_path, device="gpu0"))
+
+
+@pytest.mark.skipif(importlib.util.find_spec("torch") is not None, reason="torch installed")
+def test_cuda_without_torch_is_an_error_not_a_silent_cpu_fallback(fake_visa_root, tmp_path):
+    with pytest.raises(RuntimeError, match="needs torch"):
+        run(cfg_for(fake_visa_root, tmp_path, device="cuda"))
+
+
+@pytest.mark.parametrize(
+    "kw, msg",
+    [
+        ({"methods": ["nope"]}, "unknown method"),
+        ({"classes": ["bottle"]}, "not in the split file"),
+        ({"batch_size": 0}, "batch_size"),
+        ({"protocols": ["x"]}, "protocols"),
+    ],
+)
+def test_bad_options_are_rejected(fake_visa_root, tmp_path, kw, msg):
+    with pytest.raises(ValueError, match=msg):
+        run(cfg_for(fake_visa_root, tmp_path, **kw))
+
+
+def test_threaded_loading_gives_same_scores(fake_visa_root, tmp_path):
+    a = cfg_for(fake_visa_root, tmp_path / "a", classes=["candle"], protocols=["official"])
+    b = cfg_for(
+        fake_visa_root, tmp_path / "b", classes=["candle"], protocols=["official"], num_workers=2
+    )
+    run(a)
+    run(b)
+    name = "official_dummy_seed0.parquet"
+    pd.testing.assert_frame_equal(consolidated(a.run_dir, name), consolidated(b.run_dir, name))
+
+
+def test_script_wrapper_runs(fake_visa_root, tmp_path, repo_root):
+    import subprocess
+    import sys
+
+    res = subprocess.run(
+        [
+            sys.executable,
+            str(repo_root / "scripts" / "extract_scores.py"),
+            "--data-root",
+            str(fake_visa_root),
+            "--device",
+            "cpu",
+            "--out",
+            str(tmp_path),
+            "--classes",
+            "candle",
+            "--max-images",
+            "2",
+            "--seeds",
+            "0",
+            "--no-progress",
+            "--image-size",
+            "64",
+        ],  # fmt: skip
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode == 0, res.stderr
+    assert "estimated time" in res.stdout and "done:" in res.stdout
