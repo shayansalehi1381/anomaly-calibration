@@ -66,9 +66,9 @@ measured numbers.
 **Goal:** an empty but professional repository that CI keeps green from day one.
 
 Deliverables
-- `pyproject.toml` with optional dependency groups: `[cpu]` (numpy, pandas, pyarrow,
-  scipy, scikit-learn, matplotlib), `[gpu]` (torch, torchvision, timm, tqdm) and
-  `[dev]` (pytest, ruff, mypy).
+- `pyproject.toml`: core dependencies are the CPU stack (numpy, pandas, pyarrow, scipy,
+  scikit-learn, pillow, tqdm); optional groups `[plots]` (matplotlib), `[gpu]` (torch,
+  torchvision, timm; laptop only) and `[dev]` (pytest, ruff).
 - Package layout `src/anomcal/` (data, corruptions, models, scoring, calibration,
   shift, metrics, plots).
 - `tests/` with a smoke test, GitHub Actions CI (ruff + pytest on CPU; Linux 3.10/3.12/3.13
@@ -91,7 +91,7 @@ Done so far: everything above. arXiv:2608.15090 and arXiv:2608.18585 could **not
 because arxiv.org is blocked by the cloud network policy; both are cited by title only.
 Tests: package imports, stable per-item seeds (across processes), repo guard rules,
 `.gitignore` coverage. 34 offline tests.
-**Effort (rough guess):** ~1 session. **You do locally:** nothing (optionally `pip install -e .[cpu,dev]`
+**Effort (rough guess):** ~1 session. **You do locally:** nothing (optionally `pip install -e .[plots,dev]`
 and run `pytest` to check that it works on Windows).
 
 ---

@@ -74,8 +74,10 @@ Measured per method and per class:
    written by us, never delegated to a library). anomalib may be used for models
    only if sufficient.
 10. **Git hygiene:** small commits with conventional messages (`feat:`, `fix:`,
-    `test:`, `docs:`, `chore:`, `ci:`), push after each phase, never rewrite history
-    or force-push.
+    `test:`, `docs:`, `chore:`, `ci:`). Work on branch `claude/festive-cerf-e50k0a`;
+    at the end of each phase open a PR to `main` and merge it with a **merge commit**
+    (never squash) if permissions allow, otherwise ask the author to merge. `main`
+    must always be clean and runnable. Never rewrite history or force-push.
 11. **Be honest** about failures and negative results; they go into the README.
 12. At the end of the project, ask the author 15 interview-style questions about the
     project and give feedback on the answers.
