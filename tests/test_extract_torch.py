@@ -99,3 +99,15 @@ def test_corrupted_images_are_computed_once_for_all_methods(fake_visa_root, tmp_
     run(cfg)
     in_run = [c for c in calls if c[2] == 14]  # the warm-up uses fewer images
     assert len(in_run) == 1 + 4  # clean + 4 families x 1 level, not twice
+
+
+def test_estimate_full_run_from_a_real_measured_run(torch_run, capsys):
+    """The estimator reads the job records written by a real (tiny) run."""
+    from anomcal.estimate import main
+
+    cfg, _ = torch_run
+    assert main(["--run-dir", str(cfg.run_dir), "--classes", "candle", "cashew"]) == 0
+    out = capsys.readouterr().out
+    for m in TINY_OPTS:
+        assert m in out
+    assert "TOTAL" in out
