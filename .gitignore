@@ -218,3 +218,33 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ---------------------------------------------------------------------------
+# anomaly-calibration: data, weights and caches must never be committed
+# (CLAUDE.md, working rule 3). Small score files and figures are whitelisted
+# explicitly under results/ and docs/figures/.
+# ---------------------------------------------------------------------------
+# VisA lives only on the laptop at data/visa/
+data/
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+# model weights and checkpoints
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.onnx
+# feature caches / anomaly maps / resized-image caches (laptop only)
+cache/
+features/
+*.npz
+# raw run outputs; only the curated results/ directory is committed
+outputs/
+runs/
+# OS / editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

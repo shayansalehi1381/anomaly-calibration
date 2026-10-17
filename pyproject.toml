@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "anomaly-calibration"
+version = "0.0.1"
+description = "Conformal false-alarm calibration for industrial anomaly detection on VisA, under distribution shift."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+# Core = everything that runs in the cloud on CPU from saved score files.
+dependencies = [
+    "numpy>=1.26",
+    "pandas>=2.1",
+    "pyarrow>=14.0",
+    "scipy>=1.11",
+    "scikit-learn>=1.3",
+    "pillow>=10.0",
+    "tqdm>=4.66",
+]
+
+[project.optional-dependencies]
+plots = ["matplotlib>=3.8"]
+# Laptop only (feature extraction and scoring on the GPU). On Windows install the
+# CUDA build of torch first, see README "Runs on laptop with GPU".
+gpu = ["torch>=2.2", "torchvision>=0.17", "timm>=0.9"]
+dev = ["pytest>=8.0", "ruff>=0.5"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+markers = [
+    "gpu: needs torch and (optionally) a CUDA device; skipped when torch is not installed",
+    "integration: needs the real VisA dataset on disk (set ANOMCAL_VISA_ROOT); skipped otherwise",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+# pyflakes, pycodestyle errors, import sorting, bugbear, pyupgrade
+select = ["F", "E", "I", "B", "UP"]

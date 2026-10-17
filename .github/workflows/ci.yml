@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: tests (Linux, Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install (CPU extras only; no torch, no dataset, no model weights)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[plots,dev]"
+      - name: Lint
+        run: ruff check .
+      - name: Format
+        run: ruff format --check .
+      - name: Offline test suite
+        run: python -m pytest -q
+      - name: No data, weights or large files tracked
+        run: python -m anomcal.repo_guard
+
+  # The extraction script runs on the author's Windows laptop, so path handling and
+  # the CPU code must also pass on Windows.
+  test-windows:
+    name: tests (Windows, Python 3.12)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install (CPU extras only)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[plots,dev]"
+      - name: Offline test suite
+        run: python -m pytest -q
