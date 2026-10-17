@@ -206,6 +206,8 @@ saturates at 100%.
 | D33 | Headline uncertainty = bootstrap over the 12 classes (paired across methods). | The 100 partitions reuse the same images, so Wilson intervals over partitions are too narrow; classes are the cheapest honest unit. It does not cover within-class image sampling, other datasets or corruption strengths. | 4 |
 | D34 | Stability = RMS of (FAR − α) over conditions and classes, not the spread across classes. | A detector that is uniformly broken (FAR 100% everywhere) has zero spread; distance from the target is what the research question asks about. Spreads are reported alongside. | 4 |
 | D35 | Thresholds in Phase 4 take the order statistic by cached rank lookup; a test checks it equals `conformal_threshold` / `tolerance_threshold`. | 1.5M threshold computations; the rank depends only on (n, α, δ), not on the scores. | 4 |
+| D36 | Small-m recalibration: 5 nested random m-subsets per partition, m ∈ {10, 25, 50, 100}, same partitions as Phase 4. | Cheap (about 75 s), paired with Phase 4; nested subsets give a clean "more data" comparison. The 5 draws share a test half, so they are correlated and not counted as independent. | 4b |
+| D37 | Compare the observed FAR spread and violation rate to the exact Beta-binomial(n_test, m+1−k, k) law, per cell. | Under exchangeability it must match whatever the detector is: a mismatch would be a bug, a match shows what a small m costs. | 4b |
 
 ## 5. What failed and why
 
@@ -320,3 +322,11 @@ reference; the cause is unexplained. Details: `docs/RESULTS_EXTRACTION.md`.
   classes": the baseline wins the second because it fails everywhere. Decision D34.
 - 100% FAR and 100% TPR in setting A are the same fact (everything alarms), not a good
   detector.
+
+### Phase 4b: small m (measured)
+- Why FAR can be well below α with few points: k = ⌈(m+1)(1−α)⌉ rounds up, and E[FAR] = (m+1−k)/(m+1).
+  m = 25, α = 5%: k = 25, E[FAR] = 1/26 = 0.0385 (not 0.05) m = 50, α = 10%: k = 46, E = 5/51 = 0.098.
+- Marginal vs PAC: conformal keeps the *average* FAR ≤ α, yet 28–46% of calibration sets give FAR > α. The
+  tolerance limit bounds that share by δ = 5% (observed 4.7%, 6.7% with the finite test half; the
+  Beta-binomial law predicts 6.6%), paid for with a lower FAR and TPR.
+- Observed means and std of FAR match the exact law within 4%: nothing surprising, which is the point.

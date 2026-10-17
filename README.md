@@ -312,6 +312,52 @@ did not test what makes the detectors sensitive.
 ![FAR vs severity](docs/figures/phase4_far_vs_severity.png)
 ![Before/after recalibration](docs/figures/phase4_recalibration.png)
 
+#### Phase 4b: recalibrating with only m corrupted normals (measured)
+
+Setting B′: the threshold uses only m randomly drawn corrupted calibration normals
+(m = 10, 25, 50, 100), tested on the corrupted test half. Same 108 experiments and the same
+100 partitions as above, 12 corrupted conditions, 5 random m-subsets per partition: 500 draws
+per (experiment, condition, m). The 5 draws of a partition share one test half, so they are
+correlated. Table: mean over the 3 methods and 12 classes (per-method numbers are in
+`results/phase4/small_m_headline.csv`; methods differ by at most 0.0004 in FAR, as they must,
+because under exchangeability the FAR does not depend on the score function).
+
+| threshold | α | m | mean FAR | exact law | P(FAR>α) | exact law | TPR |
+|---|---|---|---|---|---|---|---|
+| conformal | 0.01 | 100 | 0.0099 | 0.0099 | 0.373 | 0.373 | 0.13 |
+| conformal | 0.05 | 25 | 0.0384 | 0.0385 | 0.292 | 0.292 | 0.20 |
+| conformal | 0.05 | 50 | 0.0392 | 0.0392 | 0.305 | 0.305 | 0.21 |
+| conformal | 0.05 | 100 | 0.0494 | 0.0495 | 0.456 | 0.456 | 0.23 |
+| conformal | 0.1 | 10 | 0.0909 | 0.0909 | 0.352 | 0.352 | 0.27 |
+| conformal | 0.1 | 25 | 0.0768 | 0.0769 | 0.282 | 0.282 | 0.27 |
+| conformal | 0.1 | 50 | 0.0980 | 0.0980 | 0.439 | 0.439 | 0.30 |
+| conformal | 0.1 | 100 | 0.0989 | 0.0990 | 0.459 | 0.461 | 0.30 |
+| tolerance | 0.05 | 100 | 0.0198 | 0.0198 | 0.067 | 0.066 | 0.17 |
+| tolerance | 0.1 | 50 | 0.0392 | 0.0392 | 0.047 | 0.047 | 0.21 |
+| tolerance | 0.1 | 100 | 0.0494 | 0.0495 | 0.047 | 0.048 | 0.23 |
+
+- **What is guaranteed on average still holds.** Mean FAR ≤ α in every certifiable cell and it
+  matches the exact law E[FAR] = (m + 1 − k)/(m + 1) to 3–4 decimals. Across the 396 (method, class,
+  m, kind, α) cells, the observed spread of FAR is 0.96–1.03 times the exact Beta-binomial spread.
+  This checks the code and the exchangeability of corrupted calibration vs test normals; it is
+  not a finding about the detectors.
+- **A small m costs reliability, not average coverage.** The mean FAR can sit well below α
+  (conformal α = 5%, m = 25: 3.8%) because k = ⌈(m+1)(1−α)⌉ rounds up. For conformal, 28–46% of
+  draws have FAR > α at every m, because the guarantee is on the average. The tolerance limit
+  keeps that share near its δ = 5% target (4.7% at m = 50 and 100 for α = 10%; 6.7% at α = 5%,
+  m = 100, where the exact law, which includes the finite test half, also gives 6.6%), at the
+  price of a lower FAR and lower TPR (α = 5%, m = 100: FAR 2.0%, TPR 17% vs 23% for conformal).
+- **What cannot be certified** (explicit `not_certifiable`, never clamped), checked against the code:
+  conformal α = 1% needs m ≥ 99 (so only m = 100 works), α = 5% needs m ≥ 19 (m = 10 fails);
+  the tolerance limit needs m ≥ 29 (α = 10%), 59 (α = 5%), 299 (α = 1%, so none of our m).
+- **TPR is low everywhere** (13–30%), the same message as Phase 4: after severity 1–5
+  corruption the detectors have little power left, whatever m is.
+- Uncertainty: the class-bootstrap intervals are very narrow here because every class follows the
+  same law; they do not include the Monte-Carlo noise of the 500 correlated draws. The headline
+  numbers match the exact law, so we use the law, not the interval, as the reference.
+
+![Small-m recalibration](docs/figures/phase4_small_m.png)
+
 Phase 5 (final write-up) follows.
 
 ## Limitations
@@ -378,6 +424,7 @@ score files with the same CPU install:
 ```bash
 python -m anomcal.phase3   # Phase 3, about 1 min
 python -m anomcal.phase4   # Phase 4 (writes results/phase4/ and 2 figures), about 25 s
+python -m anomcal.phase4m  # Phase 4b, small-m recalibration, about 75 s
 ```
 
 ### Runs on the laptop with a GPU (Windows, RTX 3060 6 GB)

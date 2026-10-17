@@ -267,11 +267,12 @@ Done (`anomcal.phase4`, `tests/test_phase4.py`; run with `python -m anomcal.phas
   everywhere (DINOv2-kNN least), B restores it exactly but the detectors lose most of their
   detection power.
 
+Phase 4b, done (`anomcal.phase4m`, `tests/test_phase4m.py`): recalibration with only
+m ∈ {10, 25, 50, 100} corrupted normals (500 draws per experiment and condition), compared with the
+exact Beta-binomial law. Mean FAR ≤ α and matches the law; conformal exceeds α in 28–46% of draws;
+the tolerance limit keeps that near δ; α = 1% is certifiable only at m = 100 (conformal).
+
 Not done (kept as the optional / follow-up part of the original plan)
-- Recalibration on a **small** shifted normal set (m ∈ {10, 25, 50, 100}). Setting B here
-  uses the full calibration half (138–277 images), so it is the best case. With m < 99,
-  α = 1% is not certifiable by split conformal at all (α_min = 1/(m+1)), and the tolerance
-  limit needs m ≥ 299; this is the natural next experiment.
 - Mismatched severity (calibrate at severity s, test at s′): skipped on request.
 - A score-shift detector to flag when recalibration is needed.
 
