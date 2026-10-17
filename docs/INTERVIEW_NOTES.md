@@ -157,6 +157,16 @@ their normal scores come from a different distribution `F'`. The FAR becomes
 
 Hence we report FAR *and* detection rate under every shift.
 
+**Worked example (what `tests/test_phase4.py` checks).** Clean normal scores N(0,1), corrupted
+normal scores N(d,1). The conformal threshold from clean calibration scores is about
+`z = Φ⁻¹(1−α)`. On corrupted test normals the FAR is `P(N(d,1) > z) = 1 − Φ(z − d)`: for
+α = 5% and d = 0.5 that is 1 − Φ(1.145) ≈ 12.6%, i.e. 2.5× the target, even for a "small" 0.5σ
+shift. If we instead calibrate on the corrupted calibration scores, the threshold becomes
+`d + z`, and the FAR is back to about α. The exchangeability that the proof needs is restored
+because calibration and test now come from the same distribution. In our real data the shifts are
+not 0.5σ but often many σ (PatchCore, candle, JPEG severity 1: 0.65 ± 0.08 → 1.49 ± 0.04), so FAR
+saturates at 100%.
+
 ## 4. Key decisions log
 
 | # | Decision | Why | Phase |
@@ -191,6 +201,11 @@ Hence we report FAR *and* detection rate under every shift.
 | D28 | "not_certifiable" is a status with no threshold, never a clamped maximum score. | A clamped threshold would claim a guarantee it does not have. | 3 |
 | D29 | Goodness of fit with a simulated KS p-value against the exact discrete Beta-binomial law. | The textbook KS p-value assumes a continuous distribution; false-alarm counts are discrete. | 3 |
 | D30 | Report the cross-split check (train-normal calibration vs official-test normals) separately. | It is the only clean-data test that can actually fail: it probes exchangeability between VisA's two collections. | 3 |
+| D31 | Phase 4 uses the same partitions (seeded by method, seed, class, r) for every corruption, and the same image indices for clean and corrupted scores. | Corruptions are compared on identical images; the only thing that changes between A and B is the calibration scores. | 4 |
+| D32 | Setting B recalibrates on the *full* corrupted calibration half. | Best case for recalibration; small-m recalibration (10–100 images) is left as a follow-up. | 4 |
+| D33 | Headline uncertainty = bootstrap over the 12 classes (paired across methods). | The 100 partitions reuse the same images, so Wilson intervals over partitions are too narrow; classes are the cheapest honest unit. It does not cover within-class image sampling, other datasets or corruption strengths. | 4 |
+| D34 | Stability = RMS of (FAR − α) over conditions and classes, not the spread across classes. | A detector that is uniformly broken (FAR 100% everywhere) has zero spread; distance from the target is what the research question asks about. Spreads are reported alongside. | 4 |
+| D35 | Thresholds in Phase 4 take the order statistic by cached rank lookup; a test checks it equals `conformal_threshold` / `tolerance_threshold`. | 1.5M threshold computations; the rank depends only on (n, α, δ), not on the scores. | 4 |
 
 ## 5. What failed and why
 
@@ -282,3 +297,26 @@ reference; the cause is unexplained. Details: `docs/RESULTS_EXTRACTION.md`.
   parameters, versions, git hash, timings), `methods.json` (per-method model settings) and
   `fingerprint.json` (memory fraction, image size, SHA-256 of the split CSV) of the full
   extraction run that produced `results/scores/`.
+
+### Phase 4 (shift; measured)
+- Without recalibration, FAR at α = 5% (conformal, mean over 12 classes): PatchCore 0.28 / 0.95 /
+  1.00 for brightness severity 1 / 3 / 5; 0.83 / 1.00 / 1.00 for blur; 1.00 for noise and JPEG
+  at every severity. DINOv2-kNN is the least affected (brightness 0.10 / 0.42 / 0.77), the
+  baseline the most. Stability (RMS of FAR − α): DINOv2-kNN 0.80, PatchCore 0.90, baseline 0.92.
+- With recalibration FAR ≈ α − 0.004 for every method and condition, as the theory
+  predicts, but TPR at α = 5% falls from 39–65% (clean) to 6–28% (severity 5): the guarantee is
+  restored, the detector is not.
+- Ranking in setting B is not meaningful (intervals overlap completely).
+- A class-level check matters: at brightness severity 1 PatchCore's FAR is 6–8% for seven classes
+  and 96–100% for chewinggum and pipe_fryum; the mean (0.28) describes none of them.
+
+### What looked suspicious in Phase 4, and what I did about it
+- FAR = 100% from severity 1 for noise and JPEG looked too extreme. I checked the raw
+  scores (2 classes, 1 seed): the corrupted normals really sit at ~1.5–1.8 vs 0.65–1.06 clean,
+  with the anomalies at the same level (AUROC within the condition 40–49). So the pipeline
+  is doing what it should; the corruptions are simply strong. I did not test which
+  property of the images drives it.
+- "Most stable" (smallest distance from the target) is not "smallest spread across
+  classes": the baseline wins the second because it fails everywhere. Decision D34.
+- 100% FAR and 100% TPR in setting A are the same fact (everything alarms), not a good
+  detector.

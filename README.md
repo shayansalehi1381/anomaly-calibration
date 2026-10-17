@@ -13,10 +13,14 @@ normal images only, which gives a finite-sample, distribution-free guarantee
 distribution shift** (illumination, blur, noise, JPEG) for three detectors on
 **VisA**: a feature-distance baseline, PatchCore and DINOv2-kNN.
 
-> **TL;DR: status: Phases 0–3 done (Phase 4 next).** On clean VisA scores, split-conformal
+> **TL;DR: status: Phases 0–4 done (Phase 5 next).** On clean VisA scores, split-conformal
 > thresholds hit their false-alarm targets for all three detectors (e.g. 4.6–4.7% at α = 5%),
 > as theory predicts; the PAC tolerance limit cannot certify α = 1% with our 138–277
-> calibration normals per class. Every number here comes from a real run and
+> calibration normals per class. Under our synthetic corruptions, a threshold calibrated on
+> clean images **stops holding its target almost immediately** (PatchCore at severity 1: FAR 28% for brightness and 83–100% for
+> the other corruptions, instead of 5%), DINOv2-kNN degrades least, and recalibrating on
+> corrupted normals restores the FAR exactly but leaves a detector that catches few anomalies.
+> Every number here comes from a real run and
 > is labelled measured or estimated. This is a reproduction plus
 > extension of existing work, not a novelty claim (see [Prior work](docs/PRIOR_WORK.md)).
 
@@ -189,7 +193,126 @@ outcome, now verified with the real n values. Those cells are reported as
 - VisA has no engineered shift, our shifts (Phase 4) are synthetic, and conformal relies
   on exchangeability. Reproduction plus extension, no novelty claim.
 
-Phases 4–5 (FAR drift under shift, recalibration) follow below as they are run.
+### Phase 4: does the threshold keep its FAR under corruption? (measured)
+
+Same design as Phase 3 (protocol `calib`, 108 experiments = 3 methods × 3 seeds × 12
+classes, 100 random 50/50 partitions each, the same partition for every corruption).
+Four corruptions × severities 1, 3, 5 (exact parameters: `src/anomcal/corruptions.py`, also in each `run_meta.json`), thresholds from
+the normal calibration half only, FAR measured on the **corrupted** test normals, TPR on the
+corrupted anomalies.
+
+- **Setting A, no recalibration:** threshold from the clean calibration normals. Calibration
+  and test normals are *not* exchangeable here **by construction**, so the guarantee does not
+  apply; we measure how far it breaks.
+- **Setting B, recalibration:** threshold from corrupted calibration normals of the same
+  corruption and severity. This **needs normal images under the new condition**, which a
+  deployed system may not have.
+
+Split conformal, α = 5%; cell = FAR (excess FAR = FAR − α), mean over 12 classes
+(`results/phase4/headline.csv` has all α, both threshold kinds, 95% intervals and the worst class):
+
+| corruption | method | A sev 1 | A sev 3 | A sev 5 | B sev 1 | B sev 3 | B sev 5 |
+|---|---|---|---|---|---|---|---|
+| brightness | baseline | 0.494 (+0.444) | 0.993 (+0.943) | 1.000 (+0.950) | 0.046 (-0.004) | 0.045 (-0.005) | 0.046 (-0.004) |
+| brightness | dinov2_knn | 0.104 (+0.054) | 0.422 (+0.372) | 0.773 (+0.723) | 0.045 (-0.005) | 0.046 (-0.004) | 0.046 (-0.004) |
+| brightness | patchcore | 0.279 (+0.229) | 0.951 (+0.901) | 1.000 (+0.950) | 0.046 (-0.004) | 0.046 (-0.004) | 0.046 (-0.004) |
+| gaussian_blur | baseline | 0.955 (+0.905) | 1.000 (+0.950) | 1.000 (+0.950) | 0.046 (-0.004) | 0.046 (-0.004) | 0.046 (-0.004) |
+| gaussian_blur | dinov2_knn | 0.160 (+0.110) | 0.985 (+0.935) | 1.000 (+0.950) | 0.045 (-0.005) | 0.046 (-0.004) | 0.045 (-0.005) |
+| gaussian_blur | patchcore | 0.831 (+0.781) | 1.000 (+0.950) | 1.000 (+0.950) | 0.045 (-0.005) | 0.046 (-0.004) | 0.046 (-0.004) |
+| gaussian_noise | baseline | 1.000 (+0.950) | 1.000 (+0.950) | 1.000 (+0.950) | 0.046 (-0.004) | 0.046 (-0.004) | 0.046 (-0.004) |
+| gaussian_noise | dinov2_knn | 0.904 (+0.854) | 1.000 (+0.950) | 1.000 (+0.950) | 0.045 (-0.005) | 0.046 (-0.004) | 0.046 (-0.004) |
+| gaussian_noise | patchcore | 1.000 (+0.950) | 1.000 (+0.950) | 1.000 (+0.950) | 0.045 (-0.005) | 0.046 (-0.004) | 0.046 (-0.004) |
+| jpeg_compression | baseline | 1.000 (+0.950) | 1.000 (+0.950) | 1.000 (+0.950) | 0.046 (-0.004) | 0.046 (-0.004) | 0.046 (-0.004) |
+| jpeg_compression | dinov2_knn | 0.741 (+0.691) | 0.967 (+0.917) | 1.000 (+0.950) | 0.045 (-0.005) | 0.045 (-0.005) | 0.045 (-0.005) |
+| jpeg_compression | patchcore | 1.000 (+0.950) | 1.000 (+0.950) | 1.000 (+0.950) | 0.046 (-0.004) | 0.046 (-0.004) | 0.046 (-0.004) |
+
+Detection rate (TPR) on the corrupted anomalies at that threshold, and the image AUROC
+*within* the condition (normals and anomalies both corrupted). Clean AUROC (class mean, over
+3 seeds): baseline 80.0, DINOv2-kNN 89.8, PatchCore 89.6.
+
+| corruption | method | TPR A sev 1/3/5 | TPR B sev 1/3/5 | AUROC within condition sev 1/3/5 |
+|---|---|---|---|---|
+| brightness | baseline | 0.72/0.99/1.00 | 0.31/0.15/0.14 | 75/60/59 |
+| brightness | dinov2_knn | 0.63/0.73/0.88 | 0.57/0.37/0.21 | 87/77/67 |
+| brightness | patchcore | 0.72/0.97/1.00 | 0.60/0.45/0.28 | 86/73/64 |
+| gaussian_blur | baseline | 0.98/1.00/1.00 | 0.17/0.06/0.09 | 63/46/51 |
+| gaussian_blur | dinov2_knn | 0.70/1.00/1.00 | 0.57/0.22/0.12 | 87/64/53 |
+| gaussian_blur | patchcore | 0.98/1.00/1.00 | 0.61/0.27/0.15 | 84/62/57 |
+| gaussian_noise | baseline | 1.00/1.00/1.00 | 0.14/0.08/0.08 | 59/51/51 |
+| gaussian_noise | dinov2_knn | 0.97/1.00/1.00 | 0.25/0.11/0.07 | 64/51/50 |
+| gaussian_noise | patchcore | 1.00/1.00/1.00 | 0.36/0.21/0.13 | 67/59/55 |
+| jpeg_compression | baseline | 1.00/1.00/1.00 | 0.18/0.15/0.08 | 61/55/53 |
+| jpeg_compression | dinov2_knn | 0.91/0.99/1.00 | 0.30/0.19/0.11 | 69/61/54 |
+| jpeg_compression | patchcore | 1.00/1.00/1.00 | 0.28/0.14/0.06 | 67/55/49 |
+
+**Stability ranking** (`results/phase4/stability.csv`; root-mean-square of FAR − α over the 12
+shifted conditions and 12 classes, 0 = target kept everywhere; lower is more stable):
+
+| setting, α = 5% conformal | baseline | PatchCore | DINOv2-kNN |
+|---|---|---|---|
+| A: no recalibration, RMS excess FAR (95% class-bootstrap) | 0.919 (0.911–0.930) | 0.902 (0.891–0.913) | **0.799 (0.766–0.828)** |
+| A: spread of FAR across classes / across seeds | 0.038 / 0.003 | 0.058 / 0.006 | 0.143 / 0.011 |
+| B: recalibrated, RMS excess FAR | 0.0048 | 0.0047 | 0.0050 |
+
+What we measured:
+
+- **No recalibration, the target is not kept.** At α = 5%, every method has FAR 97–100% by
+  severity 3 for blur, noise and JPEG. Only brightness (all methods at severity 1) and
+  DINOv2-kNN at blur severity 1 (16%) stay moderate.
+  DINOv2-kNN is the most stable in all 5 certifiable (kind, α) cells (mean rank 1.0, then
+  PatchCore, then the baseline). It is clearly ahead of both others, while PatchCore and the
+  baseline overlap at α = 5% (intervals above). Its RMS excess is ~11% lower than PatchCore's
+  at α = 5%, but it is still ≈ 0.8, i.e. "least bad". **All three fail.** Caution on the word
+  "stable": the baseline has the *smallest* spread across classes (0.038 vs 0.143 for
+  DINOv2-kNN) simply because it is broken uniformly (FAR ≈ 100% in every class). By spread
+  alone the ranking would invert, so we rank by distance from the target.
+- **Tolerance limit (δ = 5%) behaves like conformal under shift**: slightly lower FAR, same
+  picture (it is a slightly higher order statistic, hence a slightly higher threshold). At
+  α = 1% it is *not certifiable* (it needs 299 calibration normals, we have 138–277) and is
+  reported as such, never clamped.
+- **The aggregate hides large class differences.** Brightness severity 1 (PatchCore, α = 5%):
+  FAR is 6–8% for seven classes (capsules, fryum, macaroni1/2, pcb1–3), 11% for pcb4, 38–43% for
+  candle and cashew, and 96–100% for pipe_fryum and chewinggum (`per_class.csv`). Capsules and
+  macaroni2 (the weak PatchCore classes) stay near 5–6% for all three methods in this
+  condition. We did **not** test why; they have weak clean AUROC, so "stable" there does not
+  mean "good".
+- **With recalibration the FAR is back on target, for every method, class, corruption and
+  severity**: mean FAR is 0.3–0.5 percentage points *below* α for conformal, as the finite-sample
+  theory says (E[FAR] ≥ α − 1/(n+1)); no (method, class, condition) cell deviates by more than 1.3 points
+  (`per_class.csv`). The *violation rate* (share of partitions with FAR > α) is about 40%
+  at α = 5% in B, which is expected: a guarantee on the **average** FAR does not bound each
+  partition; the tolerance limit's violation rate in B is 8.6–10% (its design target is ≤ 5% per
+  *calibration set*; we measure it on a finite test half, so slightly higher is plausible, not
+  verified). In A it is 85–99.5%.
+- **Recalibration fixes the FAR but not the detector.** At severity 3–5 the within-condition AUROC
+  is 46–77 (near chance for noise and JPEG), and TPR at the recalibrated threshold falls from
+  39–65% (clean, α = 5%) to 6–28% at severity 5 (brightness: 14–28%). In A, TPR is ~100% only because
+  *everything* raises an alarm. So "keeps the false-alarm rate" and "is still useful" are
+  different questions. Ranking in B is meaningless: all three methods are within each other's
+  intervals.
+
+How the uncertainty was computed, and what it misses. The Phase 3 Wilson intervals were too
+narrow because the 100 partitions reuse the same images. For the headline numbers we instead
+use a **bootstrap over classes**: the 12 per-class values (each already averaged over the 3 seeds
+and 100 partitions) are resampled with replacement 2,000 times, the same draw for every method,
+and we report the 2.5–97.5% range. It covers "which VisA classes happened to be in the study".
+It does **not** cover other datasets or objects, other corruption strengths than our three, the
+sampling of images *within* a class (138–277 test normals each; the partitions reuse them), the
+seeds beyond their contribution to the class averages, or the fact that the corruptions are
+synthetic. With 12 classes it is itself rough. We also did not compute paired difference
+intervals between methods; "clearly ahead" above means non-overlapping marginal intervals.
+
+Caveat on scope: our corruptions are synthetic and strong (JPEG quality 25 at severity 1;
+see `src/anomcal/corruptions.py`), and we did not check whether they are realistic
+for a factory line. Severity 1 already moves normal scores by many clean standard deviations
+(e.g. PatchCore on candle: clean 0.65 ± 0.08, JPEG severity 1: 1.49 ± 0.04; a diagnostic
+on 2 classes, one seed), so the collapse in setting A is not surprising in hindsight. We
+did not test what makes the detectors sensitive.
+
+![FAR vs severity](docs/figures/phase4_far_vs_severity.png)
+![Before/after recalibration](docs/figures/phase4_recalibration.png)
+
+Phase 5 (final write-up) follows.
 
 ## Limitations
 
@@ -249,8 +372,13 @@ python -m pytest -q              # offline: no dataset, no GPU, no network
 python -m anomcal.repo_guard     # no data / weights / large files tracked
 ```
 
-Calibration, shift analysis, metrics and plots (Phases 3–5) will run from the committed
-score files with the same CPU install.
+Calibration, shift analysis, metrics and plots (Phases 3–5) run from the committed
+score files with the same CPU install:
+
+```bash
+python -m anomcal.phase3   # Phase 3, about 1 min
+python -m anomcal.phase4   # Phase 4 (writes results/phase4/ and 2 figures), about 25 s
+```
 
 ### Runs on the laptop with a GPU (Windows, RTX 3060 6 GB)
 
