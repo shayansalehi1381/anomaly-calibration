@@ -209,6 +209,7 @@ saturates at 100%.
 | D36 | Small-m recalibration: 5 nested random m-subsets per partition, m ∈ {10, 25, 50, 100}, same partitions as Phase 4. | Cheap (about 75 s), paired with Phase 4; nested subsets give a clean "more data" comparison. The 5 draws share a test half, so they are correlated and not counted as independent. | 4b |
 | D37 | Compare the observed FAR spread and violation rate to the exact Beta-binomial(n_test, m+1−k, k) law, per cell. | Under exchangeability it must match whatever the detector is: a mismatch would be a bug, a match shows what a small m costs. | 4b |
 | D38 | The extra mild level is stored as `severity = -1` (not 0.5, not 6). | The schema column is int8; 0 must stay "clean"; -1 cannot be mistaken for a stronger level, and the existing scores, grids (`levels_for_count`) and tests stay unchanged. Analyses plot it at x = 0.5. | 4c |
+| D39 | Stability is reported on two grids: all 16 shifted conditions and the original levels 1/3/5. | The new level should not silently change an answer already reported; the `grid` column in `stability.csv` makes both visible. | 4c |
 
 ## 5. What failed and why
 
@@ -331,3 +332,12 @@ reference; the cause is unexplained. Details: `docs/RESULTS_EXTRACTION.md`.
   tolerance limit bounds that share by δ = 5% (observed 4.7%, 6.7% with the finite test half; the
   Beta-binomial law predicts 6.6%), paid for with a lower FAR and TPR.
 - Observed means and std of FAR match the exact law within 4%: nothing surprising, which is the point.
+
+### Phase 4c: mild level (measured)
+- Check before use: the 9 consolidated score files contain the old rows unchanged (759,681 compared, 0 differences)
+  and 110,381 rows each, severities [-1, 0, 1, 3, 5], all 4 families x 12 classes x 3 seeds x 3 methods.
+- Brightness and blur: FAR near alpha at 0.5, leaving alpha at level 1: a graded curve. Noise and JPEG: already
+  41-98% at 0.5 (alpha 5%), so the first level that leaves alpha is below what we measured. I did not add another level.
+- Most stable method unchanged (DINOv2-kNN, RMS 0.72 vs 0.83 and 0.86 on all 16 conditions). Check by class:
+  at 0.5 PatchCore brightness mean 9.5%, worst class 34%.
+- Not tested: why 0.04 noise or JPEG 50 already break the threshold (no causal claim).

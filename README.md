@@ -13,7 +13,7 @@ normal images only, which gives a finite-sample, distribution-free guarantee
 distribution shift** (illumination, blur, noise, JPEG) for three detectors on
 **VisA**: a feature-distance baseline, PatchCore and DINOv2-kNN.
 
-> **TL;DR: status: Phases 0–4 done (Phase 5 next).** On clean VisA scores, split-conformal
+> **TL;DR: status: Phases 0–4 done, including a milder severity level (Phase 5 next).** On clean VisA scores, split-conformal
 > thresholds hit their false-alarm targets for all three detectors (e.g. 4.6–4.7% at α = 5%),
 > as theory predicts; the PAC tolerance limit cannot certify α = 1% with our 138–277
 > calibration normals per class. Under our synthetic corruptions, a threshold calibrated on
@@ -311,6 +311,72 @@ did not test what makes the detectors sensitive.
 
 ![FAR vs severity](docs/figures/phase4_far_vs_severity.png)
 ![Before/after recalibration](docs/figures/phase4_recalibration.png)
+
+#### Phase 4c: the extra mild level (measured)
+
+Levels 1/3/5 already break the threshold, so we added one level **milder than ImageNet-C level 1**,
+defined by us (**not an ImageNet-C level**; stored as `severity = -1`, drawn at x = 0.5\*):
+brightness +0.05, blur σ 0.5 px, noise std 0.04, JPEG quality 50 (half of level 1 each, JPEG
+quality 50 vs 25; reasons in `src/anomcal/corruptions.py`). It was scored on the laptop for all
+3 methods, 3 seeds and 12 classes; the old scores were checked to be identical (759,681 rows compared,
+0 differences). Everything below is Setting A (clean-calibrated threshold), split conformal, α = 5%,
+mean over 12 classes; the CSVs (`results/phase4/`) now cover 16 shifted conditions, and both figures
+above show levels 0, 0.5\*, 1, 3, 5.
+
+| corruption | method | FAR at 0.5* (excess) [95% CI] | FAR at 1 (excess) | FAR at 3 | FAR at 5 |
+|---|---|---|---|---|---|
+| brightness | baseline | 0.183 (+0.133) [0.09–0.33] | 0.494 (+0.444) | 0.993 | 1.000 |
+| brightness | dinov2_knn | 0.053 (+0.003) [0.05–0.06] | 0.104 (+0.054) | 0.422 | 0.773 |
+| brightness | patchcore | 0.095 (+0.045) [0.06–0.15] | 0.279 (+0.229) | 0.951 | 1.000 |
+| gaussian_blur | baseline | 0.142 (+0.092) [0.09–0.21] | 0.955 (+0.905) | 1.000 | 1.000 |
+| gaussian_blur | dinov2_knn | 0.051 (+0.001) [0.05–0.06] | 0.160 (+0.110) | 0.985 | 1.000 |
+| gaussian_blur | patchcore | 0.058 (+0.008) [0.05–0.06] | 0.831 (+0.781) | 1.000 | 1.000 |
+| gaussian_noise | baseline | 0.975 (+0.925) [0.93–1.00] | 1.000 (+0.950) | 1.000 | 1.000 |
+| gaussian_noise | dinov2_knn | 0.582 (+0.532) [0.36–0.79] | 0.904 (+0.854) | 1.000 | 1.000 |
+| gaussian_noise | patchcore | 0.847 (+0.797) [0.72–0.95] | 1.000 (+0.950) | 1.000 | 1.000 |
+| jpeg_compression | baseline | 0.966 (+0.916) [0.91–1.00] | 1.000 (+0.950) | 1.000 | 1.000 |
+| jpeg_compression | dinov2_knn | 0.409 (+0.359) [0.24–0.60] | 0.741 (+0.691) | 0.967 | 1.000 |
+| jpeg_compression | patchcore | 0.819 (+0.769) [0.68–0.94] | 1.000 (+0.950) | 1.000 | 1.000 |
+
+- **Graded curve, yes for brightness and blur** (PatchCore and DINOv2-kNN): FAR is near α at 0.5\*
+  (DINOv2-kNN 5.3% brightness, 5.1% blur; PatchCore 9.5% and 5.8%) and leaves α at level 1
+  (class-bootstrap lower bound above 6% first at level 1). The baseline already leaves α at 0.5\* (18%, 14%).
+- **Still saturated for noise and JPEG**, even at 0.5\*: baseline 97–98%, PatchCore 82–85%; DINOv2-kNN
+  58% (noise) and 41% (JPEG) with a graded rise (0.58 → 0.90 → 1.0, and 0.41 → 0.74 → 0.97). So for
+  noise and JPEG the true "first level that leaves α" is **below the mildest level we have** for all
+  three methods; we did not measure lower. Noise std 0.04 is about ±10 grey levels per pixel and JPEG 50 is a
+  common web setting, and both already break the clean-calibrated threshold; we did not test why.
+- **A class check matters at 0.5\***: PatchCore brightness has a mean FAR of 9.5%, but 2 of 12 classes are above
+  10% (worst 34%); the baseline has 6 of 12 above 10% (worst 83%); DINOv2-kNN none (worst 8.4%)
+  (`per_class.csv`).
+- **Setting B at 0.5\*** is on target again (FAR 4.5–4.6% for every method and family), and the detector keeps
+  more power than at higher levels, but still loses some for noise and JPEG:
+
+| corruption | method | TPR clean | TPR at 0.5*, A | TPR at 0.5*, B | AUROC within 0.5* (clean) |
+|---|---|---|---|---|---|
+| brightness | baseline | 0.39 | 0.54 | 0.34 | 77 (80) |
+| brightness | dinov2_knn | 0.64 | 0.63 | 0.62 | 89 (90) |
+| brightness | patchcore | 0.65 | 0.68 | 0.64 | 89 (90) |
+| gaussian_blur | baseline | 0.39 | 0.52 | 0.33 | 78 (80) |
+| gaussian_blur | dinov2_knn | 0.64 | 0.65 | 0.63 | 89 (90) |
+| gaussian_blur | patchcore | 0.65 | 0.67 | 0.65 | 89 (90) |
+| gaussian_noise | baseline | 0.39 | 0.98 | 0.20 | 64 (80) |
+| gaussian_noise | dinov2_knn | 0.64 | 0.85 | 0.39 | 76 (90) |
+| gaussian_noise | patchcore | 0.65 | 0.95 | 0.51 | 79 (90) |
+| jpeg_compression | baseline | 0.39 | 0.97 | 0.24 | 68 (80) |
+| jpeg_compression | dinov2_knn | 0.64 | 0.77 | 0.45 | 80 (90) |
+| jpeg_compression | patchcore | 0.65 | 0.96 | 0.48 | 78 (90) |
+
+- **Which method is most stable?** Unchanged: DINOv2-kNN. RMS of FAR − α over all 16 shifted conditions
+  (conformal, α = 5%, Setting A): DINOv2-kNN 0.72 (0.68–0.76), PatchCore 0.83 (0.82–0.85), baseline 0.86 (0.85–0.88);
+  on the old 12 conditions (levels 1/3/5) 0.80 / 0.90 / 0.92. DINOv2-kNN is ahead of both in all 5 certifiable cells; PatchCore is
+  now also separated from the baseline (non-overlapping marginal intervals, only on the all-levels grid). The same caveat as before:
+  DINOv2-kNN has the *largest* spread across classes (0.155 vs 0.079 and 0.058), because the others fail
+  uniformly. Rank by distance from the target, not by spread. In Setting B all three are tied
+  (`rank_summary.csv`, `grid` = `all` or `1-3-5`).
+- Uncertainty is the same class-bootstrap as before, with the same limits (no within-class image sampling, no
+  other datasets or corruption strengths; synthetic shifts). The small-m results (Phase 4b) were computed on the
+  12 levels 1/3/5 and have not been rerun with the mild level.
 
 #### Phase 4b: recalibrating with only m corrupted normals (measured)
 

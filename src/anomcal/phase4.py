@@ -47,6 +47,15 @@ from anomcal.seeding import item_rng
 SETTINGS = ("A_no_recal", "B_recal")
 CORRUPTIONS = ("brightness", "gaussian_blur", "gaussian_noise", "jpeg_compression")
 N_BOOT = 2000
+MILD = -1  # severity code of our extra mild level (milder than ImageNet-C level 1)
+GRIDS = {"all": None, "1-3-5": (1, 3, 5)}  # severity sets used for the stability ranking
+
+
+def plot_x(severity):
+    """x position of a severity: the mild level (-1) is drawn at 0.5, between clean and level 1."""
+    return 0.5 if severity == MILD else float(severity)
+
+
 KEYS = ["method", "seed", "class", "corruption", "severity", "setting", "kind", "alpha"]
 
 
@@ -255,6 +264,7 @@ def headline(pc: pd.DataFrame, n_boot: int = N_BOOT) -> pd.DataFrame:
     for col in ("violation_rate", "tpr"):
         m = _class_matrix(pc, col, index)
         out[col] = m.mean(axis=1).reindex(pd.MultiIndex.from_frame(out[index])).to_numpy()
+    out["level"] = [plot_x(v) for v in out["severity"]]
     out["classes"] = far.shape[1]
     # the class with the largest |FAR - alpha| in this cell, so a deviant class is visible
     dev = (far.sub(far.index.get_level_values("alpha").to_numpy(), axis=0)).abs()
@@ -265,8 +275,13 @@ def headline(pc: pd.DataFrame, n_boot: int = N_BOOT) -> pd.DataFrame:
     return out
 
 
-def stability(pc: pd.DataFrame, exp: pd.DataFrame, n_boot: int = N_BOOT) -> pd.DataFrame:
-    """Per (setting, kind, alpha, method) over the 12 shifted conditions (corruption != none).
+def stability(
+    pc: pd.DataFrame, exp: pd.DataFrame, n_boot: int = N_BOOT, grid: str = "all"
+) -> pd.DataFrame:
+    """Per (setting, kind, alpha, method) over the shifted conditions (corruption != none).
+
+    ``grid``: "all" = every shifted level incl. the mild one (16 conditions); "1-3-5" = the
+    ImageNet-C levels only (12 conditions, as in the first Phase 4 report).
 
     rms_excess   sqrt(mean over conditions and classes of (FAR - alpha)^2): the main stability
                  number (0 = target kept exactly in every class and condition; penalises
@@ -275,7 +290,11 @@ def stability(pc: pd.DataFrame, exp: pd.DataFrame, n_boot: int = N_BOOT) -> pd.D
     seed_spread  std over the 3 laptop seeds of the per-experiment FAR, averaged.
     rank         1 = smallest rms_excess within (setting, kind, alpha).
     """
+    levels = GRIDS[grid]
     sh = pc[pc["corruption"] != "none"]
+    if levels is not None:
+        sh = sh[sh["severity"].isin(levels)]
+        exp = exp[exp["severity"].isin(levels)]
     idx = ["setting", "kind", "alpha", "method"]
     e = sh.copy()
     e["sq"] = e["excess"] ** 2
@@ -316,6 +335,7 @@ def stability(pc: pd.DataFrame, exp: pd.DataFrame, n_boot: int = N_BOOT) -> pd.D
             )
             out.append(
                 {
+                    "grid": grid,
                     "setting": setting,
                     "kind": kind,
                     "alpha": alpha,
@@ -344,7 +364,7 @@ def _by_prefix(rows):
 def rank_summary(stab: pd.DataFrame) -> pd.DataFrame:
     """Mean rank over the (kind, alpha) cells per setting; 1 = most stable."""
     return (
-        stab.groupby(["setting", "method"])
+        stab.groupby(["grid", "setting", "method"])
         .agg(
             mean_rank=("rank", "mean"),
             wins=("rank", lambda r: int((r == 1).sum())),
@@ -422,135 +442,112 @@ def make_figures(hl: pd.DataFrame, fig_dir: Path) -> list[Path]:
     methods = sorted(hl["method"].unique())
     clean = hl[(hl["corruption"] == "none") & (hl["setting"] == "A_no_recal")]
     corrs = [c for c in CORRUPTIONS if c in set(hl["corruption"])]
+    ticks = [0, 0.5, 1, 3, 5]
+    note = "* 0.5 = extra mild level defined by us (not an ImageNet-C level)"
     paths = []
 
-    # 1) Setting A: FAR vs severity (rows = alpha, columns = corruption)
+    def style_x(ax):
+        ax.set_xticks(ticks, ["0", "0.5*", "1", "3", "5"], fontsize=8)
+        ax.axvspan(0.25, 0.75, color="#f2e6c9", alpha=0.6, lw=0)  # our own level
+
+    # 1) Setting A: FAR vs level (rows = alpha, columns = corruption)
     fig, axes = plt.subplots(
-        len(ALPHAS),
-        len(corrs),
-        figsize=(3.1 * len(corrs), 2.6 * len(ALPHAS)),
-        sharex=True,
-        squeeze=False,
-    )
+        len(ALPHAS), len(corrs), figsize=(3.1 * len(corrs), 2.6 * len(ALPHAS)),
+        sharex=True, squeeze=False,
+    )  # fmt: skip
     for i, alpha in enumerate(ALPHAS):
         for j, corr in enumerate(corrs):
             ax = axes[i][j]
+            style_x(ax)
             for method in methods:
                 for kind, marker in KIND_MARKERS.items():
-                    pts = pd.concat(
-                        [
-                            clean[
-                                (clean["method"] == method)
-                                & (clean["kind"] == kind)
-                                & (clean["alpha"] == alpha)
-                            ],
-                            hl[
-                                (hl["setting"] == "A_no_recal")
-                                & (hl["method"] == method)
-                                & (hl["kind"] == kind)
-                                & (hl["alpha"] == alpha)
-                                & (hl["corruption"] == corr)
-                            ],
-                        ]
-                    ).sort_values("severity")
+                    pts = pd.concat([
+                        clean[(clean["method"] == method) & (clean["kind"] == kind)
+                              & (clean["alpha"] == alpha)],
+                        hl[(hl["setting"] == "A_no_recal") & (hl["method"] == method)
+                           & (hl["kind"] == kind) & (hl["alpha"] == alpha)
+                           & (hl["corruption"] == corr)],
+                    ]).sort_values("level")  # fmt: skip
                     if pts.empty:
                         continue
-                    ax.plot(
-                        pts["severity"],
-                        pts["far"],
-                        marker=marker,
-                        ms=4,
-                        lw=1.2,
-                        ls="-" if kind == "conformal" else ":",
-                        color=METHOD_COLORS[method],
-                    )
+                    ax.plot(pts["level"], pts["far"], marker=marker, ms=4, lw=1.2,
+                            ls="-" if kind == "conformal" else ":",
+                            color=METHOD_COLORS[method])  # fmt: skip
             ax.axhline(alpha, color="k", lw=0.9, ls="--")
-            if not any(((hl["kind"] == "tolerance") & (hl["alpha"] == alpha)).to_numpy()):
-                ax.text(
-                    0.97,
-                    0.05,
-                    "tolerance limit:\nnot certifiable",
-                    transform=ax.transAxes,
-                    ha="right",
-                    fontsize=6,
-                    color="#555555",
-                )
-            ax.set_xticks([0, 1, 3, 5])
+            if hl[(hl["kind"] == "tolerance") & (hl["alpha"] == alpha)].empty:
+                ax.text(0.97, 0.05, "tolerance limit:\nnot certifiable", transform=ax.transAxes,
+                        ha="right", fontsize=6, color="#555555")  # fmt: skip
+            ax.set_ylim(-0.03, 1.03)
             ax.grid(alpha=0.3)
             if i == 0:
                 ax.set_title(corr, fontsize=9)
             if j == 0:
                 ax.set_ylabel(f"FAR (α={alpha:g})", fontsize=8)
             if i == len(ALPHAS) - 1:
-                ax.set_xlabel("severity (0 = clean)", fontsize=8)
-    handles = [
-        plt.Line2D([], [], color=c, lw=2, label=m) for m, c in METHOD_COLORS.items() if m in methods
-    ]
-    handles += [
-        plt.Line2D([], [], color="k", marker=mk, ls="-" if k == "conformal" else ":", ms=4, label=k)
-        for k, mk in KIND_MARKERS.items()
-    ]
+                ax.set_xlabel("severity level (0 = clean)", fontsize=8)
+    handles = [plt.Line2D([], [], color=c, lw=2, label=m) for m, c in METHOD_COLORS.items()
+               if m in methods]  # fmt: skip
+    handles += [plt.Line2D([], [], color="k", marker=mk, ls="-" if k == "conformal" else ":",
+                           ms=4, label=k) for k, mk in KIND_MARKERS.items()]  # fmt: skip
     handles.append(plt.Line2D([], [], color="k", ls="--", lw=0.9, label="target α"))
-    fig.legend(handles=handles, loc="lower center", ncol=len(handles), fontsize=8)
-    fig.suptitle(
-        "Setting A (no recalibration): FAR on corrupted test normals, "
-        "clean-calibrated threshold (mean over 12 classes)",
-        fontsize=10,
-    )
-    fig.tight_layout(rect=(0, 0.05, 1, 0.97))
+    fig.legend(handles=handles, loc="lower center", ncol=len(handles), fontsize=8,
+               bbox_to_anchor=(0.5, 0.02))  # fmt: skip
+    fig.text(0.5, 0.0, note, ha="center", fontsize=7, color="#555555")
+    fig.suptitle("Setting A (no recalibration): FAR on corrupted test normals, "
+                 "clean-calibrated threshold (mean over 12 classes)", fontsize=10)  # fmt: skip
+    fig.tight_layout(rect=(0, 0.07, 1, 0.97))
     p = fig_dir / "phase4_far_vs_severity.png"
     fig.savefig(p, dpi=110)
     plt.close(fig)
     paths.append(p)
 
-    # 2) before/after recalibration at the highest severity, conformal threshold:
-    #    top row FAR (recalibration restores it), bottom row TPR (what it costs)
-    sev = int(hl["severity"].max())
-    fig, axes = plt.subplots(2, len(ALPHAS), figsize=(4.4 * len(ALPHAS), 6.0), squeeze=False)
+    # 2) before (A, dashed, open) / after (B, solid, filled) recalibration vs level,
+    #    split conformal, alpha = 5%: top row FAR, bottom row TPR
+    alpha = 0.05
+    fig, axes = plt.subplots(2, len(corrs), figsize=(3.1 * len(corrs), 5.6),
+                             sharex=True, squeeze=False)  # fmt: skip
     for row, (col, label) in enumerate((("far", "FAR"), ("tpr", "detection rate (TPR)"))):
-        for ax, alpha in zip(axes[row], ALPHAS, strict=True):
-            for mi, method in enumerate(methods):
-                for ci, corr in enumerate(corrs):
-                    s = hl[
+        for j, corr in enumerate(corrs):
+            ax = axes[row][j]
+            style_x(ax)
+            for method in methods:
+                color = METHOD_COLORS[method]
+                for setting, ls, mfc in (("A_no_recal", "--", "white"), ("B_recal", "-", color)):
+                    s_ = hl[
                         (hl["method"] == method)
-                        & (hl["corruption"] == corr)
-                        & (hl["severity"] == sev)
+                        & (hl["setting"] == setting)
                         & (hl["kind"] == "conformal")
                         & (hl["alpha"] == alpha)
-                    ].set_index("setting")
-                    if len(s) < 2:
-                        continue
-                    x, color = ci + (mi - 1) * 0.22, METHOD_COLORS[method]
-                    ya, yb = s.loc["A_no_recal", col], s.loc["B_recal", col]
-                    ax.plot([x, x], [ya, yb], color=color, lw=1)
-                    ax.plot(x, ya, "o", mfc="white", color=color, ms=6)
-                    if col == "far":  # 95% class-bootstrap on the recalibrated FAR
-                        err = [[yb - s.loc["B_recal", "far_lo"]], [s.loc["B_recal", "far_hi"] - yb]]
-                        ax.errorbar(x, yb, yerr=err, fmt="o", color=color, ms=5, capsize=2, lw=1)
-                    else:
-                        ax.plot(x, yb, "o", color=color, ms=5)
+                    ]
+                    both = [s_[s_["corruption"] == "none"], s_[s_["corruption"] == corr]]
+                    pts = pd.concat(both).sort_values("level")
+                    err = None
+                    if col == "far":  # 95% class-bootstrap
+                        err = [pts["far"] - pts["far_lo"], pts["far_hi"] - pts["far"]]
+                    ax.errorbar(pts["level"], pts[col], yerr=err, color=color, ls=ls, marker="o",
+                                mfc=mfc, ms=4.5, lw=1.1, capsize=2)  # fmt: skip
             if col == "far":
                 ax.axhline(alpha, color="k", ls="--", lw=0.9)
-                ax.set_title(f"α={alpha:g}", fontsize=9)
-            ax.set_xticks(range(len(corrs)), [c.replace("_", "\n") for c in corrs], fontsize=7)
-            ax.grid(axis="y", alpha=0.3)
             ax.set_ylim(-0.03, 1.03)
-        axes[row][0].set_ylabel(f"{label}, severity {sev} (mean over classes)", fontsize=8)
-    handles = [
-        plt.Line2D([], [], color=c, marker="o", ls="", label=m)
-        for m, c in METHOD_COLORS.items()
-        if m in methods
-    ]
-    handles += [
-        plt.Line2D([], [], color="k", marker="o", mfc="white", ls="", label="A: no recal."),
-        plt.Line2D([], [], color="k", marker="o", ls="", label="B: recalibrated"),
-        plt.Line2D([], [], color="k", ls="--", lw=0.9, label="target α"),
-    ]
-    fig.legend(handles=handles, loc="lower center", ncol=len(handles), fontsize=7)
-    fig.suptitle(
-        "Before/after recalibration (split conformal; bars on B = 95% class-bootstrap)", fontsize=10
-    )
-    fig.tight_layout(rect=(0, 0.05, 1, 0.96))
+            ax.grid(alpha=0.3)
+            if row == 0:
+                ax.set_title(corr, fontsize=9)
+            if j == 0:
+                ax.set_ylabel(label, fontsize=8)
+            if row == 1:
+                ax.set_xlabel("severity level (0 = clean)", fontsize=8)
+    handles = [plt.Line2D([], [], color=c, lw=2, label=m) for m, c in METHOD_COLORS.items()
+               if m in methods]  # fmt: skip
+    handles += [plt.Line2D([], [], color="k", ls="--", marker="o", mfc="white", ms=4.5,
+                           label="A: no recalibration"),
+                plt.Line2D([], [], color="k", ls="-", marker="o", ms=4.5, label="B: recalibrated"),
+                plt.Line2D([], [], color="k", ls="--", lw=0.9, label="target α = 5%")]  # fmt: skip
+    fig.legend(handles=handles, loc="lower center", ncol=len(handles), fontsize=7,
+               bbox_to_anchor=(0.5, 0.025))  # fmt: skip
+    fig.text(0.5, 0.0, note, ha="center", fontsize=7, color="#555555")
+    fig.suptitle("Before/after recalibration (split conformal, α = 5%; "
+                 "bars on FAR = 95% class-bootstrap)", fontsize=10)  # fmt: skip
+    fig.tight_layout(rect=(0, 0.08, 1, 0.96))
     p = fig_dir / "phase4_recalibration.png"
     fig.savefig(p, dpi=110)
     plt.close(fig)
@@ -575,7 +572,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     exp = run_all(df, args.partitions)
     pc = per_class(exp)
     hl = headline(pc, args.boot)
-    stab = stability(pc, exp, args.boot)
+    stab = pd.concat([stability(pc, exp, args.boot, g) for g in GRIDS], ignore_index=True)
     outputs = {
         "experiments.csv": exp,
         "per_class.csv": pc,
