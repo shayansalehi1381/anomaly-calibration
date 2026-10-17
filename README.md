@@ -1,7 +1,7 @@
 # Conformal False-Alarm Calibration for Industrial Anomaly Detection under Distribution Shift
 
 [![CI](https://github.com/shayansalehi1381/anomaly-calibration/actions/workflows/ci.yml/badge.svg)](https://github.com/shayansalehi1381/anomaly-calibration/actions/workflows/ci.yml)
-![tests](https://img.shields.io/badge/tests-204%20passed%20offline-brightgreen)
+![tests](https://img.shields.io/badge/tests-206%20passed%20offline-brightgreen)
 ![python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![license](https://img.shields.io/badge/license-MIT-lightgrey)
 
