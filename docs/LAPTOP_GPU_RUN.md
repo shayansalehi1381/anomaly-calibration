@@ -155,6 +155,52 @@ Copy-Item outputs\extract\full\scores\pixel_metrics.csv results\scores\
 Copy-Item outputs\extract\full\run_meta.json, outputs\extract\full\methods.json, outputs\extract\full\fingerprint.json results\scores\
 ```
 
+## Stage (d): extra mild severity level (only the new conditions)
+
+Why: noise and JPEG already give FAR ≈ 100% at level 1, so levels 1/3/5 show no graded
+curve. One extra level per family, **milder than ImageNet-C level 1** and stored as
+`severity = -1` (the other levels and all existing scores are untouched):
+
+| family | level -1 | vs level 1 | why |
+|---|---|---|---|
+| brightness | +0.05 on HSV value | half of +0.1 | same halving as 0.1 → 0.2 |
+| gaussian_blur | σ = 0.5 px | half of 1 px | a Gaussian below ~0.5 px is almost a no-op |
+| gaussian_noise | std 0.04 | half of 0.08 | the 1 → 2 step is also +0.04 |
+| jpeg_compression | quality 50 | 25 | 25…7 are all heavy; 50 is a common "mild" setting |
+
+The JPEG value is the least certain (it may still hurt a lot); we only learn that from the run.
+
+Work to do: 3 methods × 3 seeds × 12 classes × 4 families = **432 new chunks**, `calib`
+protocol only. Clean and levels 1/3/5 already exist and are skipped. The memory bank of every
+job is rebuilt (that is most of the cost). Config: `configs\extra_mild_level.json`.
+
+```powershell
+git pull
+# 0. the old run must still be on disk: expect 1512 chunk files (1404 calib + 108 official; arithmetic)
+(Get-ChildItem outputs\extract\full\chunks -Recurse -Filter *.parquet).Count
+
+# 1. what will be done (prints the estimate, scores nothing)
+python scripts\extract_scores.py --config configs\extra_mild_level.json --estimate-only
+
+# 2. the run (resumable: after Ctrl+C or a crash, rerun the same command)
+python scripts\extract_scores.py --config configs\extra_mild_level.json
+
+# 3. check: expect 1944 chunk files and severity -1 in every calib file
+(Get-ChildItem outputs\extract\full\chunks -Recurse -Filter *.parquet).Count
+python -c "import pandas as pd; d=pd.read_parquet(r'outputs\extract\full\scores\calib_patchcore_seed0.parquet'); print(sorted(d.severity.unique()), len(d))"   # [-1, 0, 1, 3, 5] 110381
+
+# 4. copy the small files back and push on a new branch
+git checkout -b results/mild-level
+Copy-Item outputs\extract\full\scores\calib_*.parquet results\scores\
+Copy-Item outputs\extract\full\run_meta.json results\provenance\
+python -m anomcal.repo_guard
+git add results; git commit -m "results: extra mild severity level (-1) scores"; git push -u origin results/mild-level
+```
+
+Expected: the old 5.8 MB of scores grows by about 31% (rows 84,409 → 110,381 per calib file;
+estimate, not measured), each calib file stays below 1 MB, far under the 5 MiB guard.
+Prediction for the time: see ROADMAP "Phase 4c". Peak VRAM does not change (same models).
+
 ## Troubleshooting
 
 | symptom | fix |

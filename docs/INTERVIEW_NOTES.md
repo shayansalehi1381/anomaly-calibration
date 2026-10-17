@@ -208,6 +208,7 @@ saturates at 100%.
 | D35 | Thresholds in Phase 4 take the order statistic by cached rank lookup; a test checks it equals `conformal_threshold` / `tolerance_threshold`. | 1.5M threshold computations; the rank depends only on (n, α, δ), not on the scores. | 4 |
 | D36 | Small-m recalibration: 5 nested random m-subsets per partition, m ∈ {10, 25, 50, 100}, same partitions as Phase 4. | Cheap (about 75 s), paired with Phase 4; nested subsets give a clean "more data" comparison. The 5 draws share a test half, so they are correlated and not counted as independent. | 4b |
 | D37 | Compare the observed FAR spread and violation rate to the exact Beta-binomial(n_test, m+1−k, k) law, per cell. | Under exchangeability it must match whatever the detector is: a mismatch would be a bug, a match shows what a small m costs. | 4b |
+| D38 | The extra mild level is stored as `severity = -1` (not 0.5, not 6). | The schema column is int8; 0 must stay "clean"; -1 cannot be mistaken for a stronger level, and the existing scores, grids (`levels_for_count`) and tests stay unchanged. Analyses plot it at x = 0.5. | 4c |
 
 ## 5. What failed and why
 

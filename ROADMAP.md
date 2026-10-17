@@ -276,6 +276,16 @@ Not done (kept as the optional / follow-up part of the original plan)
 - Mismatched severity (calibrate at severity s, test at s′): skipped on request.
 - A score-shift detector to flag when recalibration is needed.
 
+Phase 4c, prepared (not run): an extra mild level (`severity = -1`, milder than ImageNet-C level 1)
+for all four families, defined and tested in `anomcal.corruptions`, config
+`configs/extra_mild_level.json`, commands in `docs/LAPTOP_GPU_RUN.md` stage (d).
+**Laptop time estimate: about 1 h 04 min** (`estimate_full_run.py` fitted on the measured full run:
+baseline 4 min, DINOv2-kNN 15 min, PatchCore 37 min, load + corrupt 6 min; an estimate, not a
+measurement; the same model predicted 3 h 52 min for the full run, measured 3 h 53 min, but it was
+fitted on that run, so this is not an independent check). Extra size ≈ +1.8 MB over 9 files.
+Waiting for the author to run it and push the scores; the Phase 4 analysis then needs a rerun with
+x = 0.5 for the mild level (`phase4.py` currently plots severities 0/1/3/5).
+
 ---
 
 ## Phase 5: Error analysis, figures, final README ☐
