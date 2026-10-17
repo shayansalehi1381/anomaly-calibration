@@ -404,3 +404,18 @@ def test_jobs_are_recorded_with_timings(full_run):
     assert j["n_eval"] == 14 and j["scorer"]["method"] == "dummy"
     meta = json.loads((cfg.run_dir / "run_meta.json").read_text())[-1]
     assert len(meta["jobs"]) == 4 and meta["method_settings"]["dummy"] == {"thumbnail": 16}
+
+
+@pytest.mark.parametrize("name", ["gpu_smoke", "gpu_one_class", "full_run", "smoke_dummy"])
+def test_shipped_configs_are_valid(repo_root, name):
+    from anomcal.corruptions import levels_for_count
+    from anomcal.scorers import AVAILABLE_METHODS, settings_dict
+
+    cfg = config_from_args(["--config", str(repo_root / "configs" / f"{name}.json")])
+    assert set(cfg.methods) <= set(AVAILABLE_METHODS)
+    for m in cfg.methods:
+        settings_dict(m, cfg.method_options.get(m))
+    assert cfg.levels == levels_for_count(3)
+    if name == "gpu_one_class":  # its chunks must land in the same folder as the full run
+        full = config_from_args(["--config", str(repo_root / "configs" / "full_run.json")])
+        assert cfg.run_dir == full.run_dir and cfg.max_images is None
