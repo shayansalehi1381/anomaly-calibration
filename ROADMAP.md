@@ -145,7 +145,7 @@ output and timings (no results are pushed).
 
 ---
 
-## Phase 2: Models + metrics, then the single laptop run ◐ (code in review; laptop runs pending)
+## Phase 2: Models + metrics, then the single laptop run ☑ (scores in results/scores/)
 
 **Goal:** real scores for 3 methods × 3 seeds × (clean + 12 shifted conditions).
 
@@ -196,7 +196,14 @@ noise 2.9 ms, JPEG 1.9 ms. The smoke test's own estimate was 10.2 s, and it took
 | decode every image once | 10,821 images × 16.5 ms | ≈ 3.0 min |
 | corruptions, shared by the 3 methods | 3 seeds × 6,493 eval images × 12 conditions, at the strongest-level cost (upper bound) | ≤ 12.7 min (it would be ≈ 38 min without sharing) |
 
-**GPU part: not measured yet.** Workload per method: 3 × 84,409 calib + 3 × 2,162
+**Measured (laptop, full run):** 3 h 53 min wall clock for all 1,470 remaining chunks
+(764,064 image-conditions); `estimate_full_run.py` had predicted 3 h 44 min from the
+one-class measurement (cashew, 3 min 04 s), i.e. about 4% low. Measured peak VRAM on
+cashew: baseline 362 MB, PatchCore 1,222 MB, DINOv2-kNN 1,035 MB (upper bounds for the
+largest bank: 1,456 / 2,458 / 2,082 MB). No reductions were needed. Results:
+`docs/RESULTS_EXTRACTION.md`.
+
+**Before the run (kept for the record): GPU part not measured yet.** Workload per method: 3 × 84,409 calib + 3 × 2,162
 official image-conditions ≈ 260k scored images, plus 38,961 memory images to embed.
 My FLOP-based guess (an assumption, not a measurement) is ~2–3 h for all three methods
 together, dominated by PatchCore's kNN and coreset. Stage (b) replaces this with a
