@@ -1,7 +1,7 @@
 # Conformal False-Alarm Calibration for Industrial Anomaly Detection under Distribution Shift
 
 [![CI](https://github.com/shayansalehi1381/anomaly-calibration/actions/workflows/ci.yml/badge.svg)](https://github.com/shayansalehi1381/anomaly-calibration/actions/workflows/ci.yml)
-![tests](https://img.shields.io/badge/tests-34%20passed%20offline-brightgreen)
+![tests](https://img.shields.io/badge/tests-204%20passed%20offline-brightgreen)
 ![python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![license](https://img.shields.io/badge/license-MIT-lightgrey)
 
@@ -13,8 +13,8 @@ normal images only, which gives a finite-sample, distribution-free guarantee
 distribution shift** (illumination, blur, noise, JPEG) for three detectors on
 **VisA**: a feature-distance baseline, PatchCore and DINOv2-kNN.
 
-> **TL;DR: status: Phase 0 of phases 0–5 done (skeleton only). No experiments have been run yet,
-> so this README contains no results.** Every number that appears here later will
+> **TL;DR: status: Phases 0–1 of 0–5 built (Phase 1 awaiting the laptop smoke test).
+> No experiments have been run yet, so this README contains no results.** Every number that appears here later will
 > come from a real run, with mean ± std over seeds. This is a reproduction plus
 > extension of existing work, not a novelty claim (see [Prior work](docs/PRIOR_WORK.md)).
 
@@ -78,10 +78,17 @@ Known up front; the list will grow as results come in.
 - **Synthetic shifts only.** The corruptions are controlled stand-ins for real
   acquisition changes. Real shifts (new product batches, a new camera) may behave
   differently.
-- **Few normal test images per class in the official VisA split** (roughly 80; to be
-  confirmed in Phase 1). We therefore enlarge the normal pool from the training split,
-  which leaves a smaller memory bank than the standard protocol uses. AUROC is reported
-  on both splits and labelled clearly.
+- **Few normal test images per class in the official VisA split**: 50–101 per class
+  (962 in total; verified from `split_csv/1cls.csv`, see
+  [docs/SPLIT_PROTOCOL.md](docs/SPLIT_PROTOCOL.md)). We therefore enlarge the normal pool
+  with half of the training normals, which leaves a memory bank half the standard size.
+  AUROC is reported on both protocols and labelled clearly.
+- **The PAC guarantee at α = 1% is out of reach with our split.** n_cal ≈ 138–277 per
+  class (at a 50/50 calibration/test partition), but the 95%-confidence version needs
+  n ≥ 299. The marginal guarantee (n ≥ 99) is reachable. This is known before running
+  anything, and the results will say so.
+- **Corruption strength is approximate.** We use ImageNet-C parameters (defined at 224 px)
+  at our 256 px canonical resolution, and resize VisA's non-square images to squares.
 - **Small-sample limits are real.** A non-trivial conformal threshold at α = 1% needs
   ≥ 99 calibration normals (≥ 299 for a 95%-confidence PAC guarantee). Recalibration with
   fewer shifted normals cannot certify α = 1%.
@@ -108,7 +115,10 @@ score files with the same CPU install.
 
 ### Runs on the laptop with a GPU (Windows, RTX 3060 6 GB)
 
-Only feature extraction and scoring run here (`scripts/extract_scores.py`, Phase 1–2).
+Only feature extraction and scoring run here (`scripts/extract_scores.py`). The script is
+resumable (rerun the same command after an interruption), prints a runtime estimate
+before it starts, and has a `--max-images` smoke-test mode.
+**Step-by-step Windows guide for the Phase 1 smoke test: [docs/LAPTOP_SMOKE_TEST.md](docs/LAPTOP_SMOKE_TEST.md).**
 
 ```powershell
 # 1. CUDA build of torch first (pick the CUDA version matching your driver)
@@ -118,15 +128,37 @@ pip install -e ".[gpu,plots,dev]"
 # 3. VisA stays local: extract VisA_20220922.tar to data\visa\ (git-ignored)
 ```
 
-Extraction commands and the output schema will be documented in Phase 1
-(`docs/score_schema.md`).
+```powershell
+# verify the local VisA copy against the official per-class counts
+python -m anomcal.data.visa --data-root data\visa
+# smoke test (Phase 1: CPU dummy scorer; real methods arrive in Phase 2)
+python scripts\extract_scores.py --data-root data\visa --device cpu `
+    --methods dummy --classes candle --max-images 20
+# print only the runtime estimate of a run
+python scripts\extract_scores.py --data-root data\visa --device cpu --methods dummy --estimate-only
+```
+
+Output layout and columns: [docs/score_schema.md](docs/score_schema.md). Split protocol and
+leakage checks: [docs/SPLIT_PROTOCOL.md](docs/SPLIT_PROTOCOL.md).
+
+Try the full pipeline anywhere, without VisA, on a tiny synthetic stand-in:
+
+```bash
+python -m anomcal.data.fake_visa outputs/fake_visa
+python scripts/extract_scores.py --data-root outputs/fake_visa --device cpu --seeds 0
+```
 
 ## Project layout
 
 ```
-src/anomcal/          library (seeding, repo guard; data, corruptions, models,
-                      metrics, calibration and shift modules added phase by phase)
-scripts/              laptop-side entry points (extract_scores.py, Phase 1)
+src/anomcal/          library
+  data/               VisA adapter, image loading, split protocol, fake VisA
+  corruptions.py      deterministic ImageNet-C-style shifts
+  scorers/            scorer interface (+ dummy; real methods in Phase 2)
+  scores_io.py        score schema, atomic chunk files, consolidation
+  extract.py          the laptop pipeline behind scripts/extract_scores.py
+scripts/              laptop-side entry points (extract_scores.py)
+configs/              example JSON configs for extract_scores.py --config
 tests/                offline test suite (synthetic data only)
 docs/                 prior work, interview notes, split protocol, score schema
 results/              committed small score files and figures (from Phase 2)
@@ -135,7 +167,7 @@ data/                 VisA on the laptop only, git-ignored
 
 ## Roadmap
 
-See [ROADMAP.md](ROADMAP.md): six phases (0–5). Phase 0 (skeleton, CI, prior work) is done.
+See [ROADMAP.md](ROADMAP.md): six phases (0–5). Phase 0 (skeleton, CI, prior work) is done; Phase 1 (data, splits, corruptions, extraction script) is in review.
 
 ## References
 

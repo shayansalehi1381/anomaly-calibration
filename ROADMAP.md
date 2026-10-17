@@ -45,16 +45,16 @@ measured numbers.
 
 | Topic | Proposed default | Decided in |
 |---|---|---|
-| Official split | VisA `split_csv/1cls.csv` (train is normal only; test has normal + anomalous). Counts are checked against the file in Phase 1, not assumed. | Phase 1 |
-| Our split per class | Official *train* normals → randomly split into **memory bank** (fit) and **held-out normal pool**. Official *test* normals join the held-out pool. Calibration/test partitions are drawn from this pool on CPU. Anomalies are used only for evaluation (AUROC, detection rate). | Phase 1 |
-| Why we enlarge the normal pool | The official test split has only roughly 80 normal images per class. At alpha = 1% that means about 0.8 expected false alarms, which is far too noisy to measure an FAR. | Phase 1 |
+| Official split | VisA `split_csv/1cls.csv`. **Verified in Phase 1** from the public spot-diff copy: 8,659 train normals, 962 test normals (50–101 per class), 1,200 anomalies (100 per class). See `docs/SPLIT_PROTOCOL.md`. | Phase 1 ✔ |
+| Our split per class | Official *train* normals → randomly split into **memory bank** (fit) and **held-out normal pool**, `memory_fraction = 0.5` by default. Official *test* normals join the held-out pool. Calibration/test partitions are drawn from this pool on CPU. Anomalies are used only for evaluation (AUROC, detection rate). This gives n_cal ≈ 138–277 per class at a 50/50 partition: enough for the marginal guarantee at α = 1% (≥ 99), **not** for the PAC one (≥ 299). | Phase 1 ✔ |
+| Why we enlarge the normal pool | The official test split has only 50–101 normal images per class. At alpha = 1% that means 0.5–1 expected false alarms, which is far too noisy to measure an FAR. | Phase 1 ✔ |
 | Comparability | Image AUROC is also reported on the official test split, so it can be compared with the literature. The cost of a smaller memory bank is documented honestly. | Phase 2 |
 | Calibration scope | Per class (one detector per class, as is standard for VisA). | Phase 3 |
 | Guarantee type | Primary: marginal, `E[FAR] ≤ α`. Added: the PAC / training-conditional variant `P(FAR ≤ α) ≥ 1 − δ` (Vovk, 2012), which needs n ≥ ln δ / ln(1 − α), i.e. 299 normals for α = 1%, δ = 5%. It is cheap to add and makes the small-sample story explicit. | Phase 3 |
 | Conformal threshold | `t = k`-th smallest calibration score with `k = ⌈(n+1)(1−α)⌉`. If `k > n`, the threshold is +∞ (never alarm). Consequence: alpha = 1% needs n ≥ 99 calibration normals. | Phase 3 |
-| Corruptions | Brightness/gamma (illumination), Gaussian blur, Gaussian noise, JPEG, following the ImageNet-C convention (Hendrycks & Dietterich, 2019). Applied after resizing to the model input size, seeded per (image id, corruption, severity). **3 severities by default; the number of severities is a config value and a CLI flag**, so the other 2 ImageNet-C levels can be added later without code changes. The exact parameters of every severity are written into the output metadata. | Phase 1 |
+| Corruptions | Brightness/gamma (illumination), Gaussian blur, Gaussian noise, JPEG, following the ImageNet-C convention (Hendrycks & Dietterich, 2019). Applied after resizing to one **canonical 256 px** resolution shared by all methods (so σ in pixels means the same for every detector), seeded per (image id, corruption, severity). **3 severities by default; the number of severities is a config value and a CLI flag**, so the other 2 ImageNet-C levels can be added later without code changes. The exact parameters of every severity are written into the output metadata. | Phase 1 |
 | Models | Baseline: ImageNet WideResNet-50 global pooled features, kNN distance to normal set. PatchCore: **our own lean implementation, agreed** (layer2+3 features, local aggregation, greedy coreset in torch with a seeded random projection and a configurable memory-bank size, kNN via chunked `torch.cdist` / matmul distances on GPU with a CPU fallback for tests, **no faiss**). anomalib is at most an optional cross-check, never a core dependency. DINOv2: ViT-S/14 or ViT-B/14 patch tokens + kNN, fp16. | Phase 2 |
-| Score file format | One Parquet file per (method, seed), in long format: `image_id, class, label, split_role, corruption, severity, score`. Plus `run_meta.json` (versions, seeds, timings, git hash). Full schema in `docs/score_schema.md`. | Phase 1 |
+| Score file format | Long-format Parquet, one consolidated file per (protocol, method, seed): `image_id, class, label, role, official_split, protocol, method, seed, corruption, severity, score`. Plus `run_meta.json` (config, exact severity parameters, versions, git hash, timings). Full schema in `docs/score_schema.md`. | Phase 1 ✔ |
 
 ---
 
@@ -93,7 +93,7 @@ and run `pytest` to check that it works on Windows).
 
 ---
 
-## Phase 1: Data adapter, split protocol, corruptions, extraction-script skeleton ☐
+## Phase 1: Data adapter, split protocol, corruptions, extraction-script skeleton ◐ (in review; laptop smoke test pending)
 
 **Goal:** everything the laptop run needs, except the models, written and tested
 offline.
@@ -119,10 +119,17 @@ Deliverables
   the models so the whole pipeline is tested end to end.
 - A tiny **fake VisA** generator (same folder and CSV layout, synthetic images and
   masks) for tests and CI.
-- `scripts/preprocess_visa.py` (laptop only, optional): caches images resized to the
-  model input size, because decoding ~1.5k×1k JPEGs is the likely CPU bottleneck.
-  The cache is git-ignored.
-- `docs/score_schema.md`.
+- ~~`scripts/preprocess_visa.py` (resized-image cache)~~: **deferred.** Each class is now
+  decoded once per (method, seed) and reused for all 13 conditions, so the cache may not
+  be needed. We decide after the smoke test measures the per-image load time on the laptop.
+- `docs/score_schema.md`, `docs/SPLIT_PROTOCOL.md`, `docs/LAPTOP_SMOKE_TEST.md`.
+
+Done (in review): everything above. Also added: an `official` protocol in the same
+script (memory = all train normals, clean official test set) for literature-comparable
+AUROC; a `fingerprint.json` that refuses to resume when result-affecting settings
+change; a saved split manifest per class and seed (leakage audit trail);
+`--config` JSON files; `--severities N` / `--severity-levels`; `--estimate-only`;
+`python -m anomcal.data.visa` to verify a local VisA copy.
 
 Tests: split disjointness (memory bank ∩ held-out pool = ∅ and calibration ∩ test = ∅,
 on `image_id` and on resolved file path), seed
@@ -130,9 +137,10 @@ determinism, corruption determinism and severity monotonicity (for example, PSNR
 decreases as severity increases), identity at severity 0, script resumability
 (interrupt, then rerun produces identical output), schema validation, and the
 `--max-images` behaviour.
-**Effort (rough guess):** ~2 sessions. **You do locally:** untar VisA to `data/visa/`, run
-`python scripts/extract_scores.py --methods dummy --max-images 20` as a smoke test of
-data loading on the real files, and report any errors (no results are pushed yet).
+**Effort (rough guess):** ~2 sessions. **You do locally:** follow
+`docs/LAPTOP_SMOKE_TEST.md` (clone, venv, untar VisA to `data\visa\`, verify counts, run
+the dummy smoke test on `candle` with `--max-images 20`) and send back the console
+output and timings (no results are pushed).
 
 ---
 
@@ -147,6 +155,10 @@ Deliverables
   test with a tiny random backbone, so CI never downloads weights.
 - `anomcal.metrics`: image AUROC, pixel AUROC, PRO (integrated up to FPR 0.3), FAR,
   TPR at threshold. Tested against hand-computed cases and `sklearn`.
+- Numerical care in kNN distances: the |a|² − 2ab + |b|² trick cancels badly in
+  float32 (seen in Phase 1: a memory image scored 0.71 against itself instead of 0).
+  PatchCore/DINOv2 distances need a test that a memory patch scores ≈ 0, and we will
+  compute in float64 or use `torch.cdist` where fp32/fp16 is not accurate enough.
 - Memory plan for 6 GB VRAM: fp16 backbones, batch size auto-reduced on OOM, coreset
   computed in chunks, kNN via chunked `torch.cdist`.
 - Laptop run in three stages: (a) `--max-images 20` smoke test to measure throughput.
