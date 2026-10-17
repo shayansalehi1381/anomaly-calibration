@@ -37,7 +37,7 @@ schema in `src/anomcal/scores_io.py`, enforced by `validate()` on every write an
 | `method` | string | `dummy` (Phase 1); `baseline`, `patchcore`, `dinov2_knn` (Phase 2) |
 | `seed` | int32 | seed of the memory-bank split and of the method's own randomness |
 | `corruption` | string | `none`, `brightness`, `gaussian_blur`, `gaussian_noise`, `jpeg_compression` |
-| `severity` | int8 | 0 for `none`, else 1–5 (ImageNet-C level; parameters in `run_meta.json`) |
+| `severity` | int8 | 0 for `none`, else 1–5 (ImageNet-C level; parameters in `run_meta.json`), or **-1 = extra mild level** (milder than level 1, our extension; analyses plot it at x = 0.5) |
 | `score` | float32 | image-level anomaly score, higher = more anomalous, always finite |
 
 Invariants checked by `validate()`: exact column order and dtypes; no missing values;
