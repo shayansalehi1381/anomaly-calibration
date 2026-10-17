@@ -50,7 +50,7 @@ measured numbers.
 | Why we enlarge the normal pool | The official test split has only 50–101 normal images per class. At alpha = 1% that means 0.5–1 expected false alarms, which is far too noisy to measure an FAR. | Phase 1 ✔ |
 | Comparability | Image AUROC is also reported on the official test split, so it can be compared with the literature. The cost of a smaller memory bank is documented honestly. | Phase 2 |
 | Calibration scope | Per class (one detector per class, as is standard for VisA). | Phase 3 |
-| Guarantee type | Primary: marginal, `E[FAR] ≤ α`. Added: the PAC / training-conditional variant `P(FAR ≤ α) ≥ 1 − δ` (Vovk, 2012), which needs n ≥ ln δ / ln(1 − α), i.e. 299 normals for α = 1%, δ = 5%. It is cheap to add and makes the small-sample story explicit. | Phase 3 |
+| Guarantee type | Primary: marginal, `E[FAR] ≤ α` (split conformal). Added: the PAC / training-conditional variant `P(FAR ≤ α) ≥ 1 − δ`, implemented as **Deng's tolerance limit** (arXiv:2608.15090; theory: Vovk, 2012), credited explicitly. It needs m ≥ ⌈log δ / log(1 − α)⌉, i.e. 299 normals for α = 1%, δ = 5%. Realised FAR is reported with **Wilson 95% intervals**. | Phase 3 |
 | Conformal threshold | `t = k`-th smallest calibration score with `k = ⌈(n+1)(1−α)⌉`. If `k > n`, the threshold is +∞ (never alarm). Consequence: alpha = 1% needs n ≥ 99 calibration normals. | Phase 3 |
 | Corruptions | Brightness/gamma (illumination), Gaussian blur, Gaussian noise, JPEG, following the ImageNet-C convention (Hendrycks & Dietterich, 2019). Applied after resizing to one **canonical 256 px** resolution shared by all methods (so σ in pixels means the same for every detector), seeded per (image id, corruption, severity). **3 severities by default; the number of severities is a config value and a CLI flag**, so the other 2 ImageNet-C levels can be added later without code changes. The exact parameters of every severity are written into the output metadata. | Phase 1 |
 | Models | Baseline: ImageNet WideResNet-50 global pooled features, kNN distance to normal set. PatchCore: **our own lean implementation, agreed** (layer2+3 features, local aggregation, greedy coreset in torch with a seeded random projection and a configurable memory-bank size, kNN via chunked `torch.cdist` / matmul distances on GPU with a CPU fallback for tests, **no faiss**). anomalib is at most an optional cross-check, never a core dependency. DINOv2: ViT-S/14 or ViT-B/14 patch tokens + kNN, fp16. | Phase 2 |
@@ -84,8 +84,9 @@ Deliverables
 - Mirror the structure of `selective-rag-abstention` (read-only): CI layout incl. a
   Windows job, tests layout, README with TL;DR and honest limitations, ROADMAP style.
 
-Done so far: everything above. arXiv:2608.15090 and arXiv:2608.18585 could **not** be read,
-because arxiv.org is blocked by the cloud network policy; both are cited by title only.
+Done so far: everything above. arXiv:2608.15090 and arXiv:2608.18585 could **not** be read
+from the cloud (arxiv.org is blocked by the network policy). The author has since read
+both in full, and the verified facts are in `docs/PRIOR_WORK.md` §1.
 Tests: package imports, stable per-item seeds (across processes), repo guard rules,
 `.gitignore` coverage. 34 offline tests.
 **Effort (rough guess):** ~1 session. **You do locally:** nothing (optionally `pip install -e .[plots,dev]`
@@ -168,8 +169,10 @@ Deliverables
   `run_meta.json`.
 - `docs/PATCHCORE_DESIGN.md` (and a section per method): backbone, layers, patch
   aggregation, coreset ratio / memory-bank size, image size, and why each was chosen.
-- Sanity check **in the README**: our per-class image AUROC on the official split next
-  to published PatchCore numbers on VisA where available (cited from primary sources).
+- Sanity check **in the README**: our image AUROC on the official split, next to
+  SPARC's VisA numbers (arXiv:2608.18585, Table 1, resize + center crop: PatchCore
+  WRN-50 about 94.3, AnomalyDINO about 95.3), compared with our PatchCore and DINOv2-kNN.
+  These are a **sanity check only, not a claim**, because the preprocessing differs.
   Large discrepancies are flagged honestly, not hidden, and investigated before moving
   on. Optional: an anomalib PatchCore run as a separate cross-check.
 
@@ -192,7 +195,14 @@ Deliverables
   seed). Reported **per class**, not only on average: mean and std of FAR vs alpha,
   the **histogram of per-calibration-set FAR plotted next to the theoretical
   Beta(n+1−k, k) law** (Beta-binomial for a finite test set), and TPR at the threshold.
-- The PAC variant (`P(FAR ≤ α) ≥ 1 − δ`) next to the marginal one. A comparison
+- The PAC variant (`P(FAR ≤ α) ≥ 1 − δ`), i.e. Deng's tolerance limit (smallest rank r
+  with Pr{Bin(m, α) ≥ m − r + 1} ≥ 1 − δ), next to the marginal one. A unit test must
+  reproduce Deng's primary setting (m = 150, α = 0.10, δ = 0.05 → r = 142, confidence
+  0.9693) and m_min = 299 for α = 1%, δ = 5%.
+- Wilson 95% intervals for every empirical FAR (tested against hand-computed values,
+  e.g. 1/137 → [0.13%, 4.02%]).
+- `α_min(n)` helpers: 1/(n+1) for split conformal and 1 − δ^(1/m) for the tolerance limit,
+  used to mark settings that cannot be certified. A comparison
   with a naive threshold (the empirical (1−α) quantile without the +1 correction)
   shows why the correction matters.
 - Results table and figures in `results/`, README section, and the math in
@@ -219,8 +229,10 @@ Deliverables
   worst case), with seed std.
 - Mitigation: recalibrate on m shifted normal images (m ∈ {10, 25, 50, 100}, disjoint
   from the shifted test set), and measure how much of the guarantee is restored.
-  Honest note up front: with m < 99, alpha = 1% cannot be certified at all (the
-  threshold becomes +∞). That is a result to report, not to hide.
+  Both thresholds are recalibrated (split conformal and Deng's tolerance limit).
+  Honest note up front: with m < 99, alpha = 1% cannot be certified by split conformal
+  at all (the threshold becomes +∞; α_min = 1/(m+1)), and the tolerance limit needs
+  m ≥ 299 at δ = 5%. That is a result to report, not to hide.
 - Optional (only if time permits): a simple score-shift detector (for example, a
   conformal test on a batch of normal scores) to *flag* when recalibration is needed.
 
@@ -254,6 +266,19 @@ Deliverables
 
 **Effort (rough guess):** ~2 sessions. **You do locally:** optionally render thumbnails of failure
 cases and review the figures.
+
+---
+
+## Future work (not in scope now)
+
+Listed so they are not forgotten. **Not started, and not part of Phases 0–5.**
+
+- **SPARC-style feature correction + conformal calibration:** apply a per-cell subspace
+  correction (arXiv:2608.18585) built from a few deployment-lot normals, then calibrate the
+  threshold on corrected scores. Does this restore the false-alarm target better than
+  recalibration alone?
+- **A natural-shift dataset:** evaluate on MVTec AD 2 or AeBAD-S (shift-prone according to
+  SPARC), once access and licence have been verified.
 
 ---
 
