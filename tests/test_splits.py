@@ -15,25 +15,9 @@ from anomcal.data.splits import (
     n_memory,
     partition_heldout,
 )
-from anomcal.data.visa import EXPECTED_1CLS_COUNTS, VisaRecord, make_image_id
+from anomcal.data.visa import EXPECTED_1CLS_COUNTS, VisaRecord, records_from_counts
 
-
-def synthetic_visa_records() -> list[VisaRecord]:
-    """Records with the real per-class VisA counts (no image files needed)."""
-    recs = []
-    for cls, (n_tr, n_te, n_an) in EXPECTED_1CLS_COUNTS.items():
-        for i in range(n_tr + n_te):
-            rel = f"{cls}/Data/Images/Normal/{i:04d}.JPG"
-            split = "train" if i < n_tr else "test"
-            recs.append(VisaRecord(make_image_id(cls, 0, rel), cls, split, 0, rel, None))
-        for i in range(n_an):
-            rel = f"{cls}/Data/Images/Anomaly/{i:03d}.JPG"
-            mask = f"{cls}/Data/Masks/Anomaly/{i:03d}.png"
-            recs.append(VisaRecord(make_image_id(cls, 1, rel), cls, "test", 1, rel, mask))
-    return recs
-
-
-REAL_SIZED = synthetic_visa_records()
+REAL_SIZED = records_from_counts(EXPECTED_1CLS_COUNTS)
 
 
 @pytest.mark.parametrize("cls", sorted(EXPECTED_1CLS_COUNTS))
