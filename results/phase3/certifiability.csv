@@ -1,0 +1,13 @@
+class,n_cal,conformal_alpha_min,conformal_0.01,conformal_0.05,conformal_0.1,tolerance_0.01,tolerance_0.05,tolerance_0.1,tolerance_m_min_1pct,tolerance_m_min_5pct
+candle,275,0.00362319,certified,certified,certified,not_certifiable,certified,certified,299,59
+capsules,166,0.00598802,certified,certified,certified,not_certifiable,certified,certified,299,59
+cashew,138,0.00719424,certified,certified,certified,not_certifiable,certified,certified,299,59
+chewinggum,138,0.00719424,certified,certified,certified,not_certifiable,certified,certified,299,59
+fryum,138,0.00719424,certified,certified,certified,not_certifiable,certified,certified,299,59
+macaroni1,275,0.00362319,certified,certified,certified,not_certifiable,certified,certified,299,59
+macaroni2,275,0.00362319,certified,certified,certified,not_certifiable,certified,certified,299,59
+pcb1,276,0.00361011,certified,certified,certified,not_certifiable,certified,certified,299,59
+pcb2,276,0.00361011,certified,certified,certified,not_certifiable,certified,certified,299,59
+pcb3,277,0.00359712,certified,certified,certified,not_certifiable,certified,certified,299,59
+pcb4,276,0.00361011,certified,certified,certified,not_certifiable,certified,certified,299,59
+pipe_fryum,138,0.00719424,certified,certified,certified,not_certifiable,certified,certified,299,59
