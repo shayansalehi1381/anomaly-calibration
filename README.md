@@ -107,11 +107,27 @@ Details and justification: [ROADMAP.md](ROADMAP.md).
 
 ## Results
 
-*None yet.* The results tables (image AUROC on the official split and on our split,
-pixel AUROC/PRO, FAR vs α, detection rate, FAR drift under shift) will be added in
-Phases 2–5, each from a real run. The first table will put our official-split image
-AUROC next to SPARC's VisA numbers (PatchCore WRN-50 about 94.3, AnomalyDINO about 95.3;
-different preprocessing) as a **sanity check only**, with any large gap flagged.
+### Phase 2: detector accuracy on clean images (measured; not the main result)
+
+Laptop GPU run: 12 classes × 2 protocols × 3 seeds × 3 methods × 13 conditions, 764,064
+scored image-conditions in **3 h 53 min** (the estimate was 3 h 44 min). Clean image
+AUROC (%), class mean over 12 classes, mean ± std over 3 seeds:
+
+| protocol | baseline | DINOv2-kNN | PatchCore |
+|---|---:|---:|---:|
+| official VisA split (memory = all train normals) | 80.4 | 89.6 | 90.0 |
+| our calib split (memory = ½ train normals) | 80.0 ± 0.1 | 89.8 ± 0.3 | 89.6 ± 0.3 |
+
+Pixel AUROC / PRO (official split): PatchCore 97.7 / 82.8, DINOv2-kNN 94.8 / 72.7.
+Per-class tables, run facts and caveats: [docs/RESULTS_EXTRACTION.md](docs/RESULTS_EXTRACTION.md).
+
+**Sanity check vs SPARC** (different preprocessing): PatchCore 90.0 vs ~94.3 (−4.3);
+DINOv2-kNN 89.6 vs AnomalyDINO ~95.3 (**−5.7, flagged; not explained**, see Limitations).
+Both patch methods are weak on **macaroni2** (PatchCore near chance) and **capsules**.
+This lowers detection power there; it does not affect the false-alarm guarantees, which
+use normal scores only.
+
+Phases 3–5 (FAR vs α, detection rate, FAR drift under shift) follow below as they are run.
 
 ## Limitations
 
@@ -141,6 +157,13 @@ Known up front; the list will grow as results come in.
   α = 1/(n+1), and the tolerance limit needs m ≥ ⌈log δ / log(1 − α)⌉. With 8 shifted
   normals, recalibration can certify at best α ≈ 11.1% (split conformal) or about 31%
   (tolerance limit, δ = 5%), so it **cannot** restore a 1% guarantee.
+- **DINOv2-kNN is 5.7 points below the AnomalyDINO reference (known limitation, unexplained).**
+  Hypotheses only: our 224 px input, our top-1% aggregation, square resizing instead of a
+  center crop, no masking. AnomalyDINO's exact setup could not be read from our
+  environment. A cheap one-class check at 448 px is listed as optional future work
+  ([docs/RESULTS_EXTRACTION.md](docs/RESULTS_EXTRACTION.md)).
+- **Weak classes:** macaroni2 (PatchCore 55.7–59.4 AUROC) and capsules (70.2–73.4). Web
+  sources suggest these are hard for PatchCore on VisA in general; that is unverified by us.
 - **Our PatchCore and DINOv2-kNN are lean re-implementations**, not the reference code:
   PatchCore without the paper's score re-weighting and with a simplified channel pooling;
   DINOv2-kNN at 224 px without AnomalyDINO's background masking. Details and reasons are in
