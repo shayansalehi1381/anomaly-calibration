@@ -13,9 +13,11 @@ normal images only, which gives a finite-sample, distribution-free guarantee
 distribution shift** (illumination, blur, noise, JPEG) for three detectors on
 **VisA**: a feature-distance baseline, PatchCore and DINOv2-kNN.
 
-> **TL;DR: status: Phases 0–1 done; Phase 2 code done, laptop GPU run pending.
-> No experiments have been run on VisA yet, so this README contains no results.** Every number that appears here later will
-> come from a real run, with mean ± std over seeds. This is a reproduction plus
+> **TL;DR: status: Phases 0–3 done (Phase 4 next).** On clean VisA scores, split-conformal
+> thresholds hit their false-alarm targets for all three detectors (e.g. 4.6–4.7% at α = 5%),
+> as theory predicts; the PAC tolerance limit cannot certify α = 1% with our 138–277
+> calibration normals per class. Every number here comes from a real run and
+> is labelled measured or estimated. This is a reproduction plus
 > extension of existing work, not a novelty claim (see [Prior work](docs/PRIOR_WORK.md)).
 
 ---
@@ -127,7 +129,67 @@ Both patch methods are weak on **macaroni2** (PatchCore near chance) and **capsu
 This lowers detection power there; it does not affect the false-alarm guarantees, which
 use normal scores only.
 
-Phases 3–5 (FAR vs α, detection rate, FAR drift under shift) follow below as they are run.
+### Phase 3: calibrated false-alarm rates on clean images (measured)
+
+Setup: `calib` protocol, clean images only. For each (method, seed, class) = 108
+experiments, the held-out normal pool is split R = 100 times at random into
+calibration and test halves (n_cal = 138–277 per class). Thresholds are computed from the
+calibration half only; FAR is measured on the test half. Code: `src/anomcal/calibration.py`,
+`src/anomcal/phase3.py`; outputs in `results/phase3/`. Reproduce on CPU in about 1 minute
+with `python -m anomcal.phase3`.
+
+Pooled empirical FAR over all classes, seeds and partitions, with Wilson 95% interval,
+next to the exact theoretical mean (Beta-binomial law):
+
+| method | α | split conformal: FAR [Wilson] | theory | tolerance limit (δ = 5%): FAR [Wilson] | theory | detection rate at conformal α |
+|---|---|---|---|---|---|---|
+| baseline | 1% | 0.73% [0.71, 0.75] | 0.71% | not certifiable | – | 19.5% |
+| baseline | 5% | 4.69% [4.64, 4.73] | 4.58% | 2.75% [2.71, 2.78] | 2.61% | 39.1% |
+| baseline | 10% | 9.75% [9.68, 9.81] | 9.61% | 6.92% [6.87, 6.98] | 6.63% | 51.4% |
+| DINOv2-kNN | 1% | 0.71% [0.70, 0.73] | 0.71% | not certifiable | – | 37.6% |
+| DINOv2-kNN | 5% | 4.61% [4.57, 4.66] | 4.58% | 2.69% [2.66, 2.73] | 2.61% | 64.3% |
+| DINOv2-kNN | 10% | 9.65% [9.59, 9.72] | 9.61% | 6.86% [6.81, 6.92] | 6.63% | 72.9% |
+| PatchCore | 1% | 0.71% [0.70, 0.73] | 0.71% | not certifiable | – | 41.4% |
+| PatchCore | 5% | 4.67% [4.63, 4.72] | 4.58% | 2.71% [2.67, 2.74] | 2.61% | 65.0% |
+| PatchCore | 10% | 9.73% [9.67, 9.80] | 9.61% | 6.90% [6.84, 6.95] | 6.63% | 73.5% |
+
+![Phase 3 FAR vs alpha](docs/figures/phase3_far_vs_alpha.png)
+
+**Certifiable?** Split conformal certifies α = 1%, 5% and 10% in every class (smallest
+certifiable α = 1/(n+1) ≤ 0.72%). The tolerance limit (δ = 5%) certifies 5% and 10% in
+every class and **1% in none** (it needs m ≥ 299; we have 138–277). This is the expected
+outcome, now verified with the real n values. Those cells are reported as
+"not_certifiable"; no threshold is faked.
+
+**How to read this (caveats):**
+- On clean data with random splits of a fixed pool, the false-alarm count follows the
+  Beta-binomial law *exactly*, for any detector (only the ranks matter). The agreement
+  above therefore mainly checks our implementation. The informative test is Phase 4
+  (shift), where exchangeability is broken by construction.
+- One test set is noisy: in about 29–45% of partitions the empirical FAR exceeds α under
+  split conformal (theory: 29–43%). The guarantee is an *average*, and the 5–95% range
+  across partitions spans about ±3 points at α = 5%. The tolerance limit exceeds α in
+  8–11% of partitions (theory: 9–10%), which is the price of measuring on 137–277 test
+  images, not a violation of Pr[true FAR ≤ α] ≥ 95%.
+- Wilson intervals assume independent test images, but the 100 partitions reuse the same
+  pool, so these intervals are too narrow. The pooled FAR is 0–5% (relative) above the
+  theoretical mean (most visible for the tolerance limit), still below α everywhere.
+- Goodness of fit (simulated KS against the exact law): 33 of 540 tests reject at 5%
+  (6.1%; p = 0.14 against the expected 5%). In the α = 1% subgroup it is 12 of 108 (11.1%),
+  borderline after correcting for picking that subgroup. Unexplained; the same procedure
+  rejects 4.0% on synthetic data where the law holds by construction.
+- **Cross-split check** (a real-data test): calibrate on held-out *train* normals, test on
+  the *official test* normals, which VisA collected separately. DINOv2-kNN gets 11.4%
+  [10.3, 12.6] at α = 10% (expected 9.9%) and 5.6% at α = 5% (expected 4.9%); PatchCore
+  10.9% at α = 10%. This is a weak hint that VisA's test normals score slightly higher than
+  its train normals, a small natural shift. It is not conclusive: the 3 seeds reuse the
+  same test images, and per-experiment tests rarely reject.
+- Detection power varies a lot by class: at a conformal α = 5%, PatchCore catches 95.5% of
+  anomalies on chewinggum but 6.1% on macaroni2 (`results/phase3/per_class.csv`).
+- VisA has no engineered shift, our shifts (Phase 4) are synthetic, and conformal relies
+  on exchangeability. Reproduction plus extension, no novelty claim.
+
+Phases 4–5 (FAR drift under shift, recalibration) follow below as they are run.
 
 ## Limitations
 

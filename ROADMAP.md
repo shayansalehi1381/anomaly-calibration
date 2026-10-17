@@ -218,7 +218,7 @@ files (stage (c) lists what to copy into `results/scores/`).
 
 ---
 
-## Phase 3: Split-conformal calibration and empirical FAR (CPU) ☐
+## Phase 3: Split-conformal calibration and empirical FAR (CPU) ☑ (results in results/phase3/, README §Results)
 
 **Goal:** answer "does the guarantee hold on clean data?" before asking about shift.
 
