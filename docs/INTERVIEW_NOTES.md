@@ -119,6 +119,14 @@ Hence we report FAR *and* detection rate under every shift.
 | D5 | Per-item seeds from SHA-256 of the item's identity, never Python's `hash()`. | Corruption noise must not depend on processing order or resumption; `hash()` is salted per process. | 0 |
 | D6 | Own lean PatchCore in torch, no faiss. | faiss is painful on Windows; we need full control over the memory bank and over scoring corrupted images. | 0 (agreed) |
 | D7 | CI fails if data, weights, archives, images outside figure folders, or files > 5 MiB are tracked. | Working rule 3, enforced mechanically, not by discipline. | 0 |
+| D8 | Use the verified official counts (read from the public `1cls.csv`), not the paper's rounded numbers. | Test normals are 50–101 per class, not "about 80"; this decides which guarantees are reachable. | 1 |
+| D9 | `memory_fraction = 0.5`: half of the train normals go to the memory bank, the rest + the official test normals form the held-out pool. | Gives n_cal ≈ 138–277 per class (at 50/50): enough for the marginal guarantee at α = 1% (n ≥ 99), not for PAC at α = 1%, δ = 5% (n ≥ 299). Cost: a smaller memory bank, measured with the `official` protocol. | 1 |
+| D10 | A separate `official` protocol (all train normals in memory, official test set, clean only). | Literature comparison needs the standard protocol; mixing it with ours would make AUROC numbers incomparable. | 1 |
+| D11 | Corrupt at one canonical 256 px resolution for all methods, after resizing. | "σ = 2 px" must mean the same for every detector; each method does its own preprocessing afterwards. | 1 |
+| D12 | ImageNet-C parameter tables for all 5 levels; levels used = config (`--severities 3` → 1, 3, 5). | Going from 3 to 5 severities adds exactly levels 2 and 4, so a resumed run computes only the new chunks. | 1 |
+| D13 | Brightness implemented as RGB scaling by V_new / V instead of an HSV round trip. | Mathematically the same operation as adding c to V (H and S depend only on channel ratios); a test checks it against `colorsys` to within 1 grey level. | 1 |
+| D14 | Resumability through atomic chunk files (`*.tmp` + `os.replace`) and a `fingerprint.json`. | A crash can never leave a half-written file that looks finished; changing a result-affecting setting can never silently mix two experiments in one folder. | 1 |
+| D15 | `--device` has no default, and asking for CUDA without CUDA is an error. | A silent CPU fallback would turn a 1-hour GPU run into a multi-day CPU run without anyone noticing. | 1 |
 
 ## 5. What failed and why
 
@@ -127,6 +135,19 @@ Hence we report FAR *and* detection rate under every shift.
 - Phase 0: arXiv:2608.15090 and arXiv:2608.18585 could not be read, because arxiv.org
   was blocked by the cloud environment's network policy. They are cited by title only;
   see `docs/PRIOR_WORK.md`.
+- Phase 1, **`.gitignore` bug**: the pattern `data/` (meant for the dataset folder) also
+  matched the package folder `src/anomcal/data/`, so the new adapter code was silently
+  ignored by git. Found because `git status` did not list the new files. Fix: anchor
+  it as `/data/`, plus a regression test. Lesson: an ignore rule is code and deserves
+  a test.
+- Phase 1, **float32 cancellation in kNN distances**: the dummy scorer computed squared
+  distances as |a|² − 2a·b + |b|² in float32, and a memory-bank image scored **0.71**
+  against itself instead of 0. Both terms are about 3·10⁶ while their difference is
+  tiny, and float32 has only ~7 significant digits. Fix: compute in float64. This
+  matters for PatchCore in Phase 2, which uses the same trick on GPU.
+- Phase 1, **pandas 3 string dtype**: the schema validator compared dtype names
+  (`"string"`), but pandas 3 reports `"str"` for ordinary string columns. Fix: check
+  "is a string column" semantically, not by name.
 
 ## 6. Results to be able to explain
 

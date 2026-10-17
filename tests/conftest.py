@@ -33,3 +33,18 @@ def pytest_collection_modifyitems(config, items):
 @pytest.fixture
 def repo_root() -> Path:
     return REPO_ROOT
+
+
+@pytest.fixture(scope="session")
+def fake_visa_root(tmp_path_factory) -> Path:
+    """A tiny synthetic VisA tree (2 classes, 12 train / 4 test normals / 4 anomalies)."""
+    from anomcal.data.fake_visa import make_fake_visa
+
+    return make_fake_visa(tmp_path_factory.mktemp("fake_visa"))
+
+
+@pytest.fixture(scope="session")
+def fake_records(fake_visa_root):
+    from anomcal.data.visa import read_split_csv
+
+    return read_split_csv(fake_visa_root / "split_csv" / "1cls.csv")

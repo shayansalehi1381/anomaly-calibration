@@ -225,7 +225,7 @@ __marimo__/
 # explicitly under results/ and docs/figures/.
 # ---------------------------------------------------------------------------
 # VisA lives only on the laptop at data/visa/
-data/
+/data/
 *.tar
 *.tar.gz
 *.tgz

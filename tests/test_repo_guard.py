@@ -77,6 +77,14 @@ def test_gitignore_blocks_data_and_weights(repo_root, path):
 
 
 @needs_git
+@pytest.mark.parametrize("path", ["src/anomcal/data/visa.py", "tests/data/test_x.py"])
+def test_gitignore_does_not_hide_code_folders_named_data(repo_root, path):
+    """Regression: an unanchored `data/` pattern used to ignore src/anomcal/data/."""
+    res = subprocess.run(["git", "check-ignore", "-q", path], cwd=repo_root)
+    assert res.returncode == 1, f"{path} is wrongly ignored"
+
+
+@needs_git
 def test_gitignore_allows_results(repo_root):
     res = subprocess.run(
         ["git", "check-ignore", "-q", "results/scores/patchcore_seed0.parquet"], cwd=repo_root

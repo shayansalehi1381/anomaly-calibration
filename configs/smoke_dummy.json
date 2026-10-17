@@ -1,0 +1,7 @@
+{
+  "data_root": "data/visa",
+  "device": "cpu",
+  "methods": ["dummy"],
+  "classes": ["candle"],
+  "max_images": 20
+}
