@@ -277,5 +277,8 @@ reference; the cause is unexplained. Details: `docs/RESULTS_EXTRACTION.md`.
 - The first version of the FAR figure plotted the tolerance limit's α = 5% point above
   "α = 1%". I found it by looking at the rendered image, fixed it, and added a regression
   test.
-- `run_meta.json` from the laptop run was not committed, so the exact run provenance is
-  only on the laptop (follow-up).
+- `run_meta.json` from the laptop run was first not committed. It is now in
+  `results/provenance/`: `run_meta.json` (one entry per invocation: config, severity
+  parameters, versions, git hash, timings), `methods.json` (per-method model settings) and
+  `fingerprint.json` (memory fraction, image size, SHA-256 of the split CSV) of the full
+  extraction run that produced `results/scores/`.
