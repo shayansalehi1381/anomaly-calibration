@@ -1,8 +1,8 @@
 # Interview notes
 
 A living document: key decisions, the math, what failed and why. Updated at the end
-of every phase. Sections marked *(pending)* will be filled in once the corresponding
-phase has real results. Nothing in this file is a result until it says so.
+of every phase. All phases (0-5) are done; every number below is measured unless it says
+"estimated" (the final numbers and their sources are in `docs/RESULTS_SUMMARY.md`).
 
 ---
 
@@ -202,7 +202,7 @@ saturates at 100%.
 | D29 | Goodness of fit with a simulated KS p-value against the exact discrete Beta-binomial law. | The textbook KS p-value assumes a continuous distribution; false-alarm counts are discrete. | 3 |
 | D30 | Report the cross-split check (train-normal calibration vs official-test normals) separately. | It is the only clean-data test that can actually fail: it probes exchangeability between VisA's two collections. | 3 |
 | D31 | Phase 4 uses the same partitions (seeded by method, seed, class, r) for every corruption, and the same image indices for clean and corrupted scores. | Corruptions are compared on identical images; the only thing that changes between A and B is the calibration scores. | 4 |
-| D32 | Setting B recalibrates on the *full* corrupted calibration half. | Best case for recalibration; small-m recalibration (10–100 images) is left as a follow-up. | 4 |
+| D32 | Setting B recalibrates on the *full* corrupted calibration half. | Best case for recalibration; small-m recalibration (10–100 images) was done afterwards, see D36. | 4 |
 | D33 | Headline uncertainty = bootstrap over the 12 classes (paired across methods). | The 100 partitions reuse the same images, so Wilson intervals over partitions are too narrow; classes are the cheapest honest unit. It does not cover within-class image sampling, other datasets or corruption strengths. | 4 |
 | D34 | Stability = RMS of (FAR − α) over conditions and classes, not the spread across classes. | A detector that is uniformly broken (FAR 100% everywhere) has zero spread; distance from the target is what the research question asks about. Spreads are reported alongside. | 4 |
 | D35 | Thresholds in Phase 4 take the order statistic by cached rank lookup; a test checks it equals `conformal_threshold` / `tolerance_threshold`. | 1.5M threshold computations; the rank depends only on (n, α, δ), not on the scores. | 4 |
@@ -210,10 +210,12 @@ saturates at 100%.
 | D37 | Compare the observed FAR spread and violation rate to the exact Beta-binomial(n_test, m+1−k, k) law, per cell. | Under exchangeability it must match whatever the detector is: a mismatch would be a bug, a match shows what a small m costs. | 4b |
 | D38 | The extra mild level is stored as `severity = -1` (not 0.5, not 6). | The schema column is int8; 0 must stay "clean"; -1 cannot be mistaken for a stronger level, and the existing scores, grids (`levels_for_count`) and tests stay unchanged. Analyses plot it at x = 0.5. | 4c |
 | D39 | Stability is reported on two grids: all 16 shifted conditions and the original levels 1/3/5. | The new level should not silently change an answer already reported; the `grid` column in `stability.csv` makes both visible. | 4c |
+| D40 | "Clearly ahead" for the stability ranking rests on a *paired* class bootstrap (both methods recomputed on the same resampled classes), not on non-overlapping marginal intervals. | Paired differences use the correlation between methods; they answer the actual question "is A closer to the target than B?". | 5 |
+| D41 | README ≤ 250 lines; every number lives in `docs/RESULTS_SUMMARY.md`, generated from the CSVs and re-checked by a test. | Documents drifted from the data before (stale "pending" markers, 12 vs 16 conditions); a generated, tested summary cannot. | 5 |
 
 ## 5. What failed and why
 
-*(pending: filled in as it happens. Negative results are kept, not deleted.)*
+*(Negative results are kept, not deleted.)*
 
 - Phase 0: arXiv:2608.15090 and arXiv:2608.18585 could not be read from the cloud
   (arxiv.org blocked by the network policy), so at first they were cited by title only,
@@ -341,3 +343,12 @@ reference; the cause is unexplained. Details: `docs/RESULTS_EXTRACTION.md`.
 - Most stable method unchanged (DINOv2-kNN, RMS 0.72 vs 0.83 and 0.86 on all 16 conditions). Check by class:
   at 0.5 PatchCore brightness mean 9.5%, worst class 34%.
 - Not tested: why 0.04 noise or JPEG 50 already break the threshold (no causal claim).
+
+### Phase 5: paired comparison (measured)
+- Setting A, conformal α = 5%, all 16 shifted conditions: DINOv2-kNN minus PatchCore RMS excess -0.112 [-0.142, -0.085],
+  DINOv2-kNN minus baseline -0.142 [-0.179, -0.110], PatchCore minus baseline -0.030 [-0.044, -0.017]. All 30 Setting A
+  cells exclude 0, so the order DINOv2-kNN < PatchCore < baseline (closer to target first) is supported on the class
+  bootstrap, but PatchCore vs baseline is a small effect (0.01-0.05 on a scale where all values are 0.7-0.9).
+- Setting B: the largest |difference| is 0.0006: tied in practice; a few cells exclude 0 only because the differences
+  are tiny and consistent.
+- What this does not cover: within-class image sampling, other datasets, other corruption strengths; synthetic shifts.

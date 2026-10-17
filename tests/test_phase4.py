@@ -126,3 +126,19 @@ def test_mild_level_known_answer_shift():
     a = _cell(rows, "A_no_recal", "conformal", 0.05)
     expected = 1 - stats.norm.cdf(stats.norm.ppf(0.95) - 0.3)
     assert abs(a["far_mean"] - expected) < 0.01 and 0.05 < a["far_mean"] < 0.5
+
+
+def test_paired_stability_known_answer():
+    """Method a has |excess| 0.1 everywhere, b has 0.5: RMS difference is exactly -0.4."""
+    from anomcal.phase4 import paired_stability
+
+    rows = []
+    for m, e in (("dinov2_knn", 0.1), ("patchcore", 0.5), ("baseline", 0.9)):
+        for cls in "abcd":
+            for corr, sev in (("gaussian_noise", 1), ("gaussian_noise", 3)):
+                rows.append({"method": m, "class": cls, "corruption": corr, "severity": sev,
+                             "setting": "A_no_recal", "kind": "conformal",
+                             "alpha": 0.05, "excess": e})  # fmt: skip
+    out = paired_stability(pd.DataFrame(rows), n_boot=50)
+    d = out[(out.method_a == "dinov2_knn") & (out.method_b == "patchcore")].iloc[0]
+    assert abs(d["diff"] + 0.4) < 1e-12 and abs(d.diff_lo + 0.4) < 1e-12 and d.excludes_zero
