@@ -1,0 +1,7 @@
+kind,alpha,10,25,50,100
+conformal,0.01,not_certifiable,not_certifiable,not_certifiable,certified
+conformal,0.05,not_certifiable,certified,certified,certified
+conformal,0.1,certified,certified,certified,certified
+tolerance,0.01,not_certifiable,not_certifiable,not_certifiable,not_certifiable
+tolerance,0.05,not_certifiable,not_certifiable,not_certifiable,certified
+tolerance,0.1,not_certifiable,not_certifiable,certified,certified
