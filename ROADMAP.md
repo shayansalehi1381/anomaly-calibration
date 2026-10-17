@@ -6,8 +6,8 @@ the small commits stay visible), and a stop for the author's approval (see `CLAU
 ◐ in progress, ☑ done.
 
 Effort estimates are rough planning guesses, **not measurements**. Laptop compute times
-are measured for real in the Phase 2 smoke test, and this file is updated with the
-measured numbers.
+are replaced with measurements as they come in (see "Laptop compute: measured so far"
+under Phase 2).
 
 ---
 
@@ -94,7 +94,7 @@ and run `pytest` to check that it works on Windows).
 
 ---
 
-## Phase 1: Data adapter, split protocol, corruptions, extraction-script skeleton ◐ (in review; laptop smoke test pending)
+## Phase 1: Data adapter, split protocol, corruptions, extraction-script skeleton ☑ (laptop smoke test passed)
 
 **Goal:** everything the laptop run needs, except the models, written and tested
 offline.
@@ -145,30 +145,31 @@ output and timings (no results are pushed).
 
 ---
 
-## Phase 2: Models + metrics, then the single laptop run ☐
+## Phase 2: Models + metrics, then the single laptop run ◐ (code in review; laptop runs pending)
 
 **Goal:** real scores for 3 methods × 3 seeds × (clean + 12 shifted conditions).
 
 Deliverables
 - `anomcal.models`: baseline (global features + kNN), PatchCore (torch greedy coreset
-  with seeded random projection, configurable memory-bank size, chunked
-  `torch.cdist`/matmul kNN on GPU with CPU fallback, anomaly maps), DINOv2-kNN (patch tokens + kNN, anomaly maps). Each has a CPU unit
-  test with a tiny random backbone, so CI never downloads weights.
+  with seeded random projection, configurable memory-bank size, exact re-ranked kNN on
+  GPU with a CPU path for tests, anomaly maps), DINOv2-kNN (patch tokens + cosine kNN,
+  anomaly maps). Each is tested on CPU with a tiny seeded random backbone, so CI never
+  downloads weights; the real architectures are built with random weights to check shapes.
 - `anomcal.metrics`: image AUROC, pixel AUROC, PRO (integrated up to FPR 0.3), FAR,
   TPR at threshold. Tested against hand-computed cases and `sklearn`.
 - Numerical care in kNN distances: the |a|² − 2ab + |b|² trick cancels badly in
   float32 (seen in Phase 1: a memory image scored 0.71 against itself instead of 0).
-  PatchCore/DINOv2 distances need a test that a memory patch scores ≈ 0, and we will
-  compute in float64 or use `torch.cdist` where fp32/fp16 is not accurate enough.
-- Memory plan for 6 GB VRAM: fp16 backbones, batch size auto-reduced on OOM, coreset
-  computed in chunks, kNN via chunked `torch.cdist`.
-- Laptop run in three stages: (a) `--max-images 20` smoke test to measure throughput.
-  **The rough laptop-time guesses in this file are then replaced with the measured
-  numbers.** (b) One full class. (c) All classes.
+  **Done:** float32 shortlist + exact re-rank; a memory patch scores exactly 0 (tested).
+- Memory plan for 6 GB VRAM: fp16 autocast for backbones, batch halved on OOM,
+  distance blocks capped at 2²⁶ floats, coreset projection chunked, PatchCore patches
+  in a preallocated CPU buffer. Analytic budget in `docs/MODELS.md` (≈ 2 GB VRAM).
+- Laptop run in three stages (`docs/LAPTOP_GPU_RUN.md`): (a) CUDA install, warm-up
+  estimate and GPU smoke test (`--max-images 20`, class cashew); (b) one full-size class
+  (cashew, seed 0) + `scripts/estimate_full_run.py` → choose reductions; (c) all classes.
 - Commit `results/scores/*.parquet` (expected to be a few MB in total) plus
   `run_meta.json`.
-- `docs/PATCHCORE_DESIGN.md` (and a section per method): backbone, layers, patch
-  aggregation, coreset ratio / memory-bank size, image size, and why each was chosen.
+- `docs/MODELS.md`: backbone, layers, patch aggregation, coreset ratio / memory-bank
+  size, image size, and why each was chosen, per method. **Done.**
 - Sanity check **in the README**: our image AUROC on the official split, next to
   SPARC's VisA numbers (arXiv:2608.18585, Table 1, resize + center crop: PatchCore
   WRN-50 about 94.3, AnomalyDINO about 95.3), compared with our PatchCore and DINOv2-kNN.
@@ -176,10 +177,37 @@ Deliverables
   Large discrepancies are flagged honestly, not hidden, and investigated before moving
   on. Optional: an anomalib PatchCore run as a separate cross-check.
 
-**Effort (rough guess):** ~2–3 sessions + laptop compute (several hours in total,
-splittable over nights thanks to resumability; measured in stage (a)).
-**You do locally:** run stages (a)–(c), push the score files, and report the
-throughput and any OOMs.
+Done (code, in review): metrics (image/pixel AUROC, PRO), the three scorers, method
+options (`--opt`), pixel metrics on the laptop, corruptions shared between methods,
+per-job timings and peak VRAM in `run_meta.json`, `scripts/estimate_full_run.py`
+(cost model fitted to measured jobs), `scripts/auroc_table.py` (official-split AUROC
+next to the SPARC reference numbers), a CI job with CPU torch on Linux and Windows.
+
+### Laptop compute: measured so far
+
+Measured in the Phase 1 smoke test (i7-12650H, NVMe SSD, CPU only), per 256 px image:
+load 16.5 ms; corruption at the strongest level: brightness 3.6 ms, blur 4.6 ms,
+noise 2.9 ms, JPEG 1.9 ms. The smoke test's own estimate was 10.2 s, and it took 9.98 s.
+
+**CPU part of the full run, derived from those measurements** (arithmetic, not a run):
+
+| item | workload | time |
+|---|---|---|
+| decode every image once | 10,821 images × 16.5 ms | ≈ 3.0 min |
+| corruptions, shared by the 3 methods | 3 seeds × 6,493 eval images × 12 conditions, at the strongest-level cost (upper bound) | ≤ 12.7 min (it would be ≈ 38 min without sharing) |
+
+**GPU part: not measured yet.** Workload per method: 3 × 84,409 calib + 3 × 2,162
+official image-conditions ≈ 260k scored images, plus 38,961 memory images to embed.
+My FLOP-based guess (an assumption, not a measurement) is ~2–3 h for all three methods
+together, dominated by PatchCore's kNN and coreset. Stage (b) replaces this with a
+prediction fitted to real timings; this table will then be updated.
+
+Peak VRAM: analytic budget ≈ 2 GB with the defaults (`docs/MODELS.md` §4); the
+measured peak per method comes from stage (a)/(b).
+
+**Effort (rough guess):** code done in ~2 sessions; laptop compute see above.
+**You do locally:** stages (a)–(c) in `docs/LAPTOP_GPU_RUN.md`, then push the score
+files (stage (c) lists what to copy into `results/scores/`).
 
 ---
 

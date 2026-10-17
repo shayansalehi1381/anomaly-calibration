@@ -179,6 +179,14 @@ Hence we report FAR *and* detection rate under every shift.
 | D16 | PAC threshold = Deng's tolerance limit (smallest rank r with Pr{Bin(m, α) ≥ m − r + 1} ≥ 1 − δ), credited explicitly. | It is the established operational form for industrial AD; reproducing his r = 142 / 0.9693 is a unit-test target in Phase 3. | 1 (docs) |
 | D17 | Report realised FAR with Wilson 95% intervals. | Correct near 0, where the normal-approximation interval fails; also what Deng uses, so our numbers are comparable. | 1 (docs) |
 | D18 | Use SPARC's VisA image AUROC (PatchCore WRN-50 about 94.3, AnomalyDINO about 95.3; resize + center crop) only as a sanity check. | Different preprocessing; a large gap means a bug to investigate, a small gap is not a claim. | 1 (docs) |
+| D19 | Own lean PatchCore in torch: layer2+3, 3×3 aggregation, 1536→1024 channel pooling, 10% greedy coreset, max patch distance. | Every line explainable; no faiss (Windows); full control over memory banks and corrupted inputs. Simplifications (no re-weighting, single channel pooling) are documented in `docs/MODELS.md`. | 2 |
+| D20 | Exact kNN = float32 shortlist (top-8 by the fast expansion) + exact re-rank by direct differences. | The Phase 1 cancellation lesson: the score *is* a small distance. Cost of the re-rank: 8 vectors per query, negligible. Tested against a float64 brute force; memory patches score exactly 0. | 2 |
+| D21 | The coreset *does* use the fast expansion (one matvec per iteration). | Farthest-point selection compares large distances, where float32 is fine; ~11× faster on CPU; a test shows it selects the same set as the exact version. | 2 |
+| D22 | DINOv2-kNN with cosine distance computed as ||a−b||²/2 on unit vectors. | Reuses the exact kNN; for unit vectors 1 − cos = ||a−b||²/2 exactly. | 2 |
+| D23 | No center crop; one canonical 256 px image → model size on the GPU. | Maps align with masks and border defects stay visible; costs comparability with SPARC's resize + crop numbers (sanity check only). | 2 |
+| D24 | Corrupted images are computed once per (class, protocol, seed) and shared by all methods (jobs ordered class → protocol → seed → method). | From the measured laptop costs: about 13 min instead of about 38 min of CPU time; ≤ 1.5 GB RAM. | 2 |
+| D25 | Full-run estimate = cost model fitted to one measured full-size class (`estimate_full_run.py`), not the warm-up alone. | A warm-up with 8 images cannot see the coreset's ~quadratic cost or the kNN's growth with the bank. | 2 |
+| D26 | CI installs CPU torch and runs the model tests with tiny seeded backbones; the real architectures are built with random weights. | Tests the method logic and real tensor shapes without downloading weights; pretrained loading is verified on the laptop. | 2 |
 
 ## 5. What failed and why
 
@@ -200,6 +208,19 @@ Hence we report FAR *and* detection rate under every shift.
   against itself instead of 0. Both terms are about 3·10⁶ while their difference is
   tiny, and float32 has only ~7 significant digits. Fix: compute in float64. This
   matters for PatchCore in Phase 2, which uses the same trick on GPU.
+- Phase 2, **coreset cost estimate**: working out the full-run cost by hand showed that
+  the first coreset version (materialising (points − c)² on every iteration) would spend
+  an estimated ~2.4 h of the run in memory traffic alone, mostly in the `official`
+  protocol (709k patches, 71k iterations). Fixed with the one-pass distance update (D21).
+  Lesson: estimate the cost of the inner loop at the real size before the run, not after.
+- Phase 2, **two test bugs caught by the tests themselves**: (1) a preprocessing test
+  assumed one grey value maps to 0 after ImageNet normalisation, but the means differ per
+  channel; (2) a test fixture used Python's `hash()` for a seed, which is salted per
+  process (the exact pitfall from Phase 0), and was replaced by a fixed index.
+- Phase 2, **what could not be verified in the cloud**: download.pytorch.org and
+  huggingface.co are blocked there, so loading the *pretrained* WRN-50 / DINOv2 weights
+  (including timm's position-embedding resampling to 224 px) is first exercised by the
+  laptop smoke test.
 - Phase 1, **pandas 3 string dtype**: the schema validator compared dtype names
   (`"string"`), but pandas 3 reports `"str"` for ordinary string columns. Fix: check
   "is a string column" semantically, not by name.
