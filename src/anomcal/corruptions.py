@@ -12,7 +12,27 @@ gaussian_noise     sensor noise              std on [0,1] scale: .08 .12 .18 .26
 jpeg_compression   transmission/storage      JPEG quality: 25 18 15 10 7
 =================  =======================  =========================================
 
-Level 0 is "clean" (identity) for every family. The levels actually used are a
+Level 0 is "clean" (identity) for every family.
+
+Extra mild level (``MILD_LEVEL = -1``, stored as ``severity = -1``): one extra step *milder
+than ImageNet-C level 1*, added because noise and JPEG already break a clean-calibrated
+threshold at level 1, so the 1/3/5 grid shows no graded curve. It is an extension of ours,
+not an ImageNet-C level; the numbers follow each family's own step pattern:
+
+=================  =========  =================================================
+family             mild (-1)  one-line justification
+=================  =========  =================================================
+brightness         0.05       half of level 1 (+0.1), same halving step as 0.1 -> 0.2
+gaussian_blur      0.5 px     half of level 1 (1 px); below ~0.5 px a Gaussian is a no-op
+gaussian_noise     0.04       half of level 1 (0.08); the 1 -> 2 step is +0.04
+jpeg_compression   50         quality 50 is a common "mild" web setting; levels 25..7
+                              are all heavy, and Pillow's default is 75
+=================  =========  =================================================
+
+The mild level is never part of ``levels_for_count`` (the default grids are unchanged);
+it is requested explicitly (``--severity-levels -1``). The code -1 is only a label (the
+score schema stores severity as int8); in analyses it means "between clean and level 1",
+so plot it at x = 0.5 (see docs/LAPTOP_GPU_RUN.md, stage d). The levels actually used are a
 config value / CLI flag (default 3 levels: 1, 3, 5), so levels 2 and 4 can be added
 later without code changes; the parameters used are written into the run metadata.
 
@@ -40,6 +60,7 @@ from scipy.ndimage import gaussian_filter
 from anomcal.seeding import item_rng
 
 MAX_LEVEL = 5
+MILD_LEVEL = -1  # extra level milder than ImageNet-C level 1 (our extension)
 DEFAULT_N_SEVERITIES = 3
 
 
@@ -93,12 +114,15 @@ class Corruption:
     param_name: str
     params: tuple[float, ...]  # one value per level 1..MAX_LEVEL
     fn: Callable[[np.ndarray, float, np.random.Generator | None], np.ndarray]
+    mild_param: float = 0.0  # parameter of MILD_LEVEL
     random: bool = False
 
     def param(self, level: int) -> float:
         check_level(level)
         if level == 0:
             raise ValueError("level 0 is the clean image and has no parameter")
+        if level == MILD_LEVEL:
+            return self.mild_param
         return self.params[level - 1]
 
 
@@ -111,25 +135,33 @@ CORRUPTIONS: dict[str, Corruption] = {
             "value_shift",
             (0.1, 0.2, 0.3, 0.4, 0.5),
             _brightness,
+            0.05,
         ),
-        Corruption("gaussian_blur", "defocus blur", "sigma_px", (1, 2, 3, 4, 6), _gaussian_blur),
+        Corruption(
+            "gaussian_blur", "defocus blur", "sigma_px", (1, 2, 3, 4, 6), _gaussian_blur, 0.5
+        ),
         Corruption(
             "gaussian_noise",
             "sensor noise",
             "std",
             (0.08, 0.12, 0.18, 0.26, 0.38),
             _gaussian_noise,
+            0.04,
             True,
         ),
-        Corruption("jpeg_compression", "compression", "quality", (25, 18, 15, 10, 7), _jpeg),
+        Corruption("jpeg_compression", "compression", "quality", (25, 18, 15, 10, 7), _jpeg, 50),
     )
 }
 CORRUPTION_NAMES = tuple(CORRUPTIONS)
 
 
 def check_level(level: int) -> None:
-    if not isinstance(level, (int, np.integer)) or not 0 <= level <= MAX_LEVEL:
-        raise ValueError(f"severity level must be an int in [0, {MAX_LEVEL}], got {level!r}")
+    ok = isinstance(level, (int, np.integer)) and (level == MILD_LEVEL or 0 <= level <= MAX_LEVEL)
+    if not ok:
+        raise ValueError(
+            f"severity level must be an int in [0, {MAX_LEVEL}] or {MILD_LEVEL} (extra mild), "
+            f"got {level!r}"
+        )
 
 
 def levels_for_count(n: int) -> tuple[int, ...]:

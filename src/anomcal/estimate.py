@@ -203,6 +203,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     p.add_argument("--methods", nargs="+", help="default: the methods of the measured run")
     p.add_argument("--protocols", nargs="+", default=list(PROTOCOLS), choices=PROTOCOLS)
     p.add_argument("--severities", type=int, help="default: as in the measured run")
+    p.add_argument("--severity-levels", nargs="+", type=int, help="explicit levels (e.g. -1)")
+    p.add_argument("--no-clean", action="store_true",
+                   help="clean images are already scored: leave them out of the plan")  # fmt: skip
     p.add_argument("--memory-fraction", type=float, help="default: as in the measured run")
     p.add_argument("--vram-gb", type=float, default=6.0, help="GPU memory to compare against")
     args = p.parse_args(argv)
@@ -211,11 +214,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     models = fit_cost_model(jobs)
     methods = args.methods or cfg["methods"]
     levels = (
-        levels_for_count(args.severities)
+        tuple(sorted(set(args.severity_levels)))
+        if args.severity_levels
+        else levels_for_count(args.severities)
         if args.severities
         else tuple(cfg.get("severity_levels") or levels_for_count(cfg.get("n_severities", 3)))
     )
     conds = conditions(cfg.get("corruptions", list(CORRUPTION_NAMES)), levels)
+    if args.no_clean:
+        conds = [c for c in conds if c != ("none", 0)]
     frac = args.memory_fraction or cfg.get("memory_fraction", DEFAULT_MEMORY_FRACTION)
     res = predict(
         models, args.classes, args.seeds, methods, args.protocols, conds, frac,

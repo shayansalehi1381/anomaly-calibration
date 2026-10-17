@@ -7,6 +7,7 @@ from anomcal.corruptions import (
     CORRUPTION_NAMES,
     CORRUPTIONS,
     MAX_LEVEL,
+    MILD_LEVEL,
     apply_corruption,
     apply_corruption_batch,
     conditions,
@@ -126,7 +127,7 @@ def test_rejects_wrong_input(bad):
 def test_rejects_unknown_name_and_bad_level():
     with pytest.raises(KeyError):
         apply_corruption(IMG, "fog", 1, "x")
-    for lv in (-1, 6, 1.5):
+    for lv in (-2, 6, 1.5):
         with pytest.raises(ValueError):
             apply_corruption(IMG, "gaussian_blur", lv, "x")
 
@@ -152,3 +153,50 @@ def test_conditions_and_severity_table():
     table = severity_table(["jpeg_compression"], [1, 5])
     assert table["jpeg_compression"]["levels"] == {"1": 25, "5": 7}
     assert table["jpeg_compression"]["param_name"] == "quality"
+
+
+# ---- extra mild level (severity -1): milder than ImageNet-C level 1, additive ----
+
+
+@pytest.mark.parametrize("name", CORRUPTION_NAMES)
+def test_mild_level_is_milder_than_level_1_but_not_identity(name):
+    mild = apply_corruption(IMG, name, MILD_LEVEL, "img/0").astype(float)
+    one = apply_corruption(IMG, name, 1, "img/0").astype(float)
+    d_mild, d_one = np.abs(mild - IMG).mean(), np.abs(one - IMG).mean()
+    assert 0 < d_mild < d_one
+    assert CORRUPTIONS[name].param(MILD_LEVEL) != CORRUPTIONS[name].param(1)
+
+
+@pytest.mark.parametrize("name", CORRUPTION_NAMES)
+def test_mild_level_is_deterministic(name):
+    a = apply_corruption(IMG, name, MILD_LEVEL, "img/0")
+    np.testing.assert_array_equal(a, apply_corruption(IMG, name, MILD_LEVEL, "img/0"))
+
+
+def test_mild_level_does_not_change_default_grids_and_is_validated():
+    assert levels_for_count(3) == (1, 3, 5) and levels_for_count(5) == (1, 2, 3, 4, 5)
+    assert conditions(["gaussian_blur"], [MILD_LEVEL]) == [("none", 0), ("gaussian_blur", -1)]
+    assert severity_table(["jpeg_compression"], [MILD_LEVEL])["jpeg_compression"]["levels"] == {
+        "-1": 50
+    }
+    for bad in (-2, 6):
+        with pytest.raises(ValueError):
+            apply_corruption(IMG, "gaussian_blur", bad, "img/0")
+
+
+def test_mild_level_in_score_schema_and_cli():
+    from anomcal.extract import ExtractConfig, build_parser
+    from anomcal.scores_io import make_frame
+
+    df = make_frame(
+        image_ids=["c/n/0"], cls="c", labels=[0], roles=["heldout_normal"],
+        official_splits=["train"], protocol="calib", method="baseline", seed=0,
+        corruption="gaussian_blur", severity=MILD_LEVEL, scores=np.array([1.0]),
+    )  # fmt: skip
+    from anomcal.scores_io import validate
+
+    validate(df)  # severity -1 with a corruption is valid
+    args = build_parser().parse_args(["--severity-levels", "-1", "--protocols", "calib"])
+    assert args.severity_levels == [-1]
+    cfg = ExtractConfig(data_root=".", device="cpu", severity_levels=args.severity_levels)
+    assert cfg.levels == (-1,)

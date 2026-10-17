@@ -419,3 +419,29 @@ def test_shipped_configs_are_valid(repo_root, name):
     if name == "gpu_one_class":  # its chunks must land in the same folder as the full run
         full = config_from_args(["--config", str(repo_root / "configs" / "full_run.json")])
         assert cfg.run_dir == full.run_dir and cfg.max_images is None
+
+
+def test_adding_the_mild_level_later_computes_only_it_and_keeps_old_scores(
+    fake_visa_root, tmp_path
+):
+    cfg3 = cfg_for(fake_visa_root, tmp_path / "o", classes=["candle"], protocols=["calib"])
+    run(cfg3)
+    before = {p: (cfg3.run_dir / p).read_bytes() for p in chunks(cfg3.run_dir)}
+    old = consolidated(cfg3.run_dir)
+    cfg_mild = cfg_for(
+        fake_visa_root, tmp_path / "o", classes=["candle"], protocols=["calib"],
+        severity_levels=[-1],
+    )  # fmt: skip
+    entry = run(cfg_mild)
+    assert entry["chunks_written"] == 4  # one new condition per family; clean is skipped
+    new = {p for p in chunks(cfg_mild.run_dir) if p not in before}
+    assert new == {
+        f"chunks/calib/dummy/seed0/candle/{c}_s-1.parquet"
+        for c in ("brightness", "gaussian_blur", "gaussian_noise", "jpeg_compression")
+    }
+    assert all((cfg_mild.run_dir / p).read_bytes() == b for p, b in before.items())
+    both = consolidated(cfg_mild.run_dir)
+    assert sorted(both["severity"].unique()) == [-1, 0, 1, 3, 5]
+    # the old rows are unchanged in the consolidated file
+    keep = both[both["severity"] != -1].reset_index(drop=True)
+    pd.testing.assert_frame_equal(keep, old.reset_index(drop=True))
