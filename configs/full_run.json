@@ -1,0 +1,7 @@
+{
+  "data_root": "data/visa",
+  "device": "cuda",
+  "methods": ["baseline", "patchcore", "dinov2_knn"],
+  "seeds": [0, 1, 2],
+  "batch_size": 16
+}
