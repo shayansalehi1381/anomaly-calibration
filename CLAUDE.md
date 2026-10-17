@@ -79,5 +79,3 @@ Measured per method and per class:
     (never squash) if permissions allow, otherwise ask the author to merge. `main`
     must always be clean and runnable. Never rewrite history or force-push.
 11. **Be honest** about failures and negative results; they go into the README.
-12. At the end of the project, ask the author 15 interview-style questions about the
-    project and give feedback on the answers.

@@ -5,12 +5,12 @@ what each piece of prior work contributes, what we reuse from it, and where we d
 Entries marked **not read** are cited for completeness only. We describe nothing about
 their contents beyond the title, because we could not access the text.
 
-## 1. Directly related: calibrated false alarms in industrial anomaly detection
+## 1. To be read by the author
 
 | Reference | Status | Relation to this project |
 |---|---|---|
-| *Distribution-free false-alarm calibration and chance-corrected spatial evaluation for industrial anomaly detection*, arXiv:2608.15090 (2026). | **Not read.** arxiv.org was unreachable from the development environment (network policy) when this file was written (2026-10-17). Only the title was confirmed, via a web-search result. | Closest prior work by title: distribution-free false-alarm calibration for industrial AD. We treat our calibration part as a reproduction of this *idea* on VisA. Before the final README, the author should read the paper on the laptop and update this row (what it does, how we differ). |
-| *SPARC: Subspace Position-Aware Robust Few-Shot Calibration for Distribution-Shifted Industrial Anomaly Detection*, arXiv:2608.18585 (2026). | **Not read.** Found in the same web search; same access problem. | By title, it addresses calibration under distribution shift in industrial AD, which overlaps with our Phase 4. It must be checked before we make any claim about the recalibration study. |
+| *Distribution-free false-alarm calibration and chance-corrected spatial evaluation for industrial anomaly detection*, arXiv:2608.15090 (2026). | **Not read.** arxiv.org was unreachable from the development environment (network policy) when this file was written (2026-10-17). Only the title was confirmed, via a web-search result. | **To be read by the author.** No claim is based on this paper until it has been read; the row will then say what it does and how we differ. |
+| *SPARC: Subspace Position-Aware Robust Few-Shot Calibration for Distribution-Shifted Industrial Anomaly Detection*, arXiv:2608.18585 (2026). | **Not read.** Found in the same web search; same access problem. | **To be read by the author**, before the Phase 4 write-up. No claim is based on this paper until it has been read. |
 
 ## 2. Anomaly detection methods we benchmark
 
