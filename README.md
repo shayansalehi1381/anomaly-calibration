@@ -23,6 +23,7 @@ distribution shift** (illumination, blur, noise, JPEG) for three detectors on
 ## Contents
 - [Research question](#research-question)
 - [Motivation](#motivation)
+- [Relation to prior work](#relation-to-prior-work)
 - [Method (planned)](#method-planned)
 - [Results](#results)
 - [Limitations](#limitations)
@@ -50,14 +51,46 @@ stably?
   exactly what breaks under shift. We measure by how much, per method and per class, and
   how many shifted normal images are needed to recalibrate.
 
+## Relation to prior work
+
+**Reproduction plus extension; no novelty claim.** Details: [docs/PRIOR_WORK.md](docs/PRIOR_WORK.md).
+
+- **Deng (arXiv:2608.15090)** calibrates industrial AD thresholds with a one-sided
+  order-statistic **tolerance limit**: the smallest rank r with
+  Pr{Binomial(m, α) ≥ m − r + 1} ≥ 1 − δ, and τ = S₍ᵣ₎. This gives the PAC guarantee
+  Pr_cal[P₀{S > τ} ≤ α] ≥ 1 − δ, valid with ties. Deng evaluates it on ISP-AD and Magnetic
+  Tile with PatchCore, DINOv2 patch memory and a PaDiM-style detector, and reports Wilson
+  intervals for the realised FPR. The paper states that the guarantee does not extend
+  to domain shift and **does not test shift**. **Our PAC threshold is Deng's tolerance
+  limit, credited as such**; we reproduce his primary setting (m = 150, α = 0.10,
+  δ = 0.05 → r = 142, confidence 0.9693).
+- **SPARC (Han, Chu, Nowak, Chin; arXiv:2608.18585)** corrects *features* under shift with
+  a gradient-free per-cell subspace projection, built from ≤ 8 verified-normal images of
+  the deployment lot. It reports image AUROC and AU-PRO only, with **no threshold
+  calibration and no false-alarm guarantee**. It classifies **VisA as shift-free**. Its
+  VisA image AUROC (PatchCore WRN-50 about 94.3, AnomalyDINO about 95.3; resize + center
+  crop) serves **only as a sanity check** for our detectors.
+- **What we add:** we measure how calibrated thresholds, split-conformal (marginal,
+  E[FAR] ≤ α) and tolerance-limit (PAC), behave under **controlled synthetic shifts on
+  VisA**, and how much **recalibration on a small set of shifted normals** restores the
+  target false-alarm rate.
+
+**How small is "small"? (derived by us from standard theory)** With n calibration
+normals, split conformal can certify at best **α_min = 1/(n+1)**: n = 8 → 11.1%,
+n = 99 → 1%. The tolerance limit needs **m ≥ m_min = ⌈log δ / log(1 − α)⌉** normals:
+299 for α = 1%, δ = 5%. Derivations are in
+[docs/INTERVIEW_NOTES.md](docs/INTERVIEW_NOTES.md#smallest-certifiable-α-for-a-given-number-of-calibration-normals-derived-by-us).
+
 ## Method (planned)
 
 1. **Detectors**, fit on a memory bank of normal training images per class: a global-feature
    kNN baseline, our own lean PatchCore (torch, no faiss) and DINOv2 patch-kNN.
-2. **Split-conformal threshold** from held-out normal calibration images, strictly disjoint
-   from the memory bank and from the test images.
-3. **Clean evaluation** over R = 100 random calibration/test partitions: empirical FAR vs α,
-   its distribution vs the theoretical Beta law, and detection rate at the threshold.
+2. **Two thresholds** from held-out normal calibration images, strictly disjoint from the
+   memory bank and from the test images: split conformal (marginal) and Deng's tolerance
+   limit (PAC).
+3. **Clean evaluation** over R = 100 random calibration/test partitions: empirical FAR vs α
+   with **Wilson 95% intervals**, its distribution vs the theoretical Beta law, and
+   detection rate at the threshold.
 4. **Shift evaluation**: 4 corruptions × configurable severities, applied deterministically
    on the laptop. We measure FAR drift and detection rate.
 5. **Mitigation**: recalibrate on m shifted normals and measure how much of the guarantee
@@ -75,26 +108,33 @@ Phases 2–5, each from a real run.
 
 Known up front; the list will grow as results come in.
 
-- **Synthetic shifts only.** The corruptions are controlled stand-ins for real
-  acquisition changes. Real shifts (new product batches, a new camera) may behave
-  differently.
+- **VisA contains no engineered shift, and our shifts are synthetic.** SPARC classifies
+  VisA as shift-free. Our corruptions (brightness, blur, noise, JPEG) are controlled
+  stand-ins for acquisition changes; real shifts (a new product lot, a new camera) may
+  behave differently, and we make no claim about natural shift.
+- **Shift breaks the assumption by construction.** Split conformal and the tolerance
+  limit both rely on calibration and test normals being exchangeable (i.i.d. for the
+  tolerance limit). A shifted test set violates this *by design*, so "the guarantee
+  fails under shift" is expected. What we measure is *by how much*, for which methods,
+  and what recalibration recovers.
 - **Few normal test images per class in the official VisA split**: 50–101 per class
   (962 in total; verified from `split_csv/1cls.csv`, see
   [docs/SPLIT_PROTOCOL.md](docs/SPLIT_PROTOCOL.md)). We therefore enlarge the normal pool
   with half of the training normals, which leaves a memory bank half the standard size.
   AUROC is reported on both protocols and labelled clearly.
-- **The PAC guarantee at α = 1% is out of reach with our split.** n_cal ≈ 138–277 per
-  class (at a 50/50 calibration/test partition), but the 95%-confidence version needs
-  n ≥ 299. The marginal guarantee (n ≥ 99) is reachable. This is known before running
-  anything, and the results will say so.
+- **The PAC (tolerance-limit) guarantee at α = 1% is out of reach with our split.**
+  n_cal ≈ 138–277 per class (at a 50/50 calibration/test partition), but it needs
+  m_min = 299 at δ = 5%. α = 5% (m_min = 59) is reachable, and so is the marginal guarantee
+  at α = 1% (n ≥ 99). This is known before running anything, and the results will say so.
 - **Corruption strength is approximate.** We use ImageNet-C parameters (defined at 224 px)
   at our 256 px canonical resolution, and resize VisA's non-square images to squares.
-- **Small-sample limits are real.** A non-trivial conformal threshold at α = 1% needs
-  ≥ 99 calibration normals (≥ 299 for a 95%-confidence PAC guarantee). Recalibration with
-  fewer shifted normals cannot certify α = 1%.
-- **Two possibly related papers are not yet read.** arXiv:2608.15090 and arXiv:2608.18585 could not
-  be accessed from the development environment; they are to be read by the author, and no
-  claim here relies on them. See [docs/PRIOR_WORK.md](docs/PRIOR_WORK.md).
+- **Small-sample limits are real (derived by us).** Split conformal certifies at best
+  α = 1/(n+1), and the tolerance limit needs m ≥ ⌈log δ / log(1 − α)⌉. With 8 shifted
+  normals, recalibration can certify at best α ≈ 11.1% (split conformal) or about 31%
+  (tolerance limit, δ = 5%), so it **cannot** restore a 1% guarantee.
+- **Sanity-check numbers come from a different protocol.** SPARC's VisA AUROC uses resize +
+  center crop; we resize the full image to a square at 256 px. Small gaps are expected and
+  are not a claim; large gaps will be flagged and investigated.
 
 ## Reproducibility
 
@@ -188,7 +228,9 @@ Full annotated list with the role of each paper: [docs/PRIOR_WORK.md](docs/PRIOR
 13. R. J. Tibshirani et al. *Conformal Prediction Under Covariate Shift.* NeurIPS 2019.
 14. R. F. Barber et al. *Conformal prediction beyond exchangeability.* Annals of Statistics, 2023.
 15. D. Hendrycks, T. Dietterich. *Benchmarking Neural Network Robustness to Common Corruptions and Perturbations.* ICLR 2019.
-16. *Distribution-free false-alarm calibration and chance-corrected spatial evaluation for industrial anomaly detection.* arXiv:2608.15090, 2026 (not read; see Prior work).
+16. Deng. *Distribution-free false-alarm calibration and chance-corrected spatial evaluation for industrial anomaly detection.* arXiv:2608.15090, 2026.
+17. Han, Chu, Nowak, Chin. *SPARC: Subspace Position-Aware Robust Few-Shot Calibration for Distribution-Shifted Industrial Anomaly Detection.* arXiv:2608.18585, 2026.
+18. E. B. Wilson. *Probable inference, the law of succession, and statistical inference.* JASA 22(158), 1927.
 
 ## License
 
