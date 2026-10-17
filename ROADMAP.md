@@ -1,7 +1,8 @@
 # ROADMAP
 
-Phase-by-phase plan. Each phase ends with code + tests + docs/results, a push, and a
-stop for the author's approval (see `CLAUDE.md`). Status markers: ☐ not started,
+Phase-by-phase plan. Each phase ends with code + tests + docs/results, a push, a PR
+from `claude/festive-cerf-e50k0a` to `main` (merged with a merge commit, not a squash, so
+the small commits stay visible), and a stop for the author's approval (see `CLAUDE.md`). Status markers: ☐ not started,
 ◐ in progress, ☑ done.
 
 Effort estimates are rough planning guesses, **not measurements**. Laptop compute times
@@ -52,14 +53,15 @@ measured numbers.
 | Why we enlarge the normal pool | The official test split has only roughly 80 normal images per class. At alpha = 1% that means about 0.8 expected false alarms, which is far too noisy to measure an FAR. | Phase 1 |
 | Comparability | Image AUROC is also reported on the official test split, so it can be compared with the literature. The cost of a smaller memory bank is documented honestly. | Phase 2 |
 | Calibration scope | Per class (one detector per class, as is standard for VisA). | Phase 3 |
+| Guarantee type | Primary: marginal, `E[FAR] ≤ α`. Added: the PAC / training-conditional variant `P(FAR ≤ α) ≥ 1 − δ` (Vovk, 2012), which needs n ≥ ln δ / ln(1 − α), i.e. 299 normals for α = 1%, δ = 5%. It is cheap to add and makes the small-sample story explicit. | Phase 3 |
 | Conformal threshold | `t = k`-th smallest calibration score with `k = ⌈(n+1)(1−α)⌉`. If `k > n`, the threshold is +∞ (never alarm). Consequence: alpha = 1% needs n ≥ 99 calibration normals. | Phase 3 |
-| Corruptions | Brightness/gamma (illumination), Gaussian blur, Gaussian noise, JPEG, each at 3 severities, following the ImageNet-C convention (Hendrycks & Dietterich, 2019). Applied after resizing to the model input size, seeded per (image id, corruption, severity). | Phase 1 |
-| Models | Baseline: ImageNet WideResNet-50 global pooled features, kNN distance to normal set. PatchCore: our own lean implementation (layer2+3 features, local aggregation, greedy coreset, kNN via chunked `torch.cdist`, so no faiss on Windows), with anomalib as a fallback. DINOv2: ViT-S/14 or ViT-B/14 patch tokens + kNN, fp16. | Phase 2 |
+| Corruptions | Brightness/gamma (illumination), Gaussian blur, Gaussian noise, JPEG, following the ImageNet-C convention (Hendrycks & Dietterich, 2019). Applied after resizing to the model input size, seeded per (image id, corruption, severity). **3 severities by default; the number of severities is a config value and a CLI flag**, so the other 2 ImageNet-C levels can be added later without code changes. The exact parameters of every severity are written into the output metadata. | Phase 1 |
+| Models | Baseline: ImageNet WideResNet-50 global pooled features, kNN distance to normal set. PatchCore: **our own lean implementation, agreed** (layer2+3 features, local aggregation, greedy coreset in torch with a seeded random projection and a configurable memory-bank size, kNN via chunked `torch.cdist` / matmul distances on GPU with a CPU fallback for tests, **no faiss**). anomalib is at most an optional cross-check, never a core dependency. DINOv2: ViT-S/14 or ViT-B/14 patch tokens + kNN, fp16. | Phase 2 |
 | Score file format | One Parquet file per (method, seed), in long format: `image_id, class, label, split_role, corruption, severity, score`. Plus `run_meta.json` (versions, seeds, timings, git hash). Full schema in `docs/score_schema.md`. | Phase 1 |
 
 ---
 
-## Phase 0: Skeleton, CI and prior work ☐
+## Phase 0: Skeleton, CI and prior work ◐ (in review)
 
 **Goal:** an empty but professional repository that CI keeps green from day one.
 
@@ -69,8 +71,9 @@ Deliverables
   `[dev]` (pytest, ruff, mypy).
 - Package layout `src/anomcal/` (data, corruptions, models, scoring, calibration,
   shift, metrics, plots).
-- `tests/` with a smoke test, GitHub Actions CI (ruff + pytest on CPU, Python 3.11,
-  no network or model downloads), and `.gitignore` hardened (`data/`, `*.tar`,
+- `tests/` with a smoke test, GitHub Actions CI (ruff + pytest on CPU; Linux 3.10/3.12/3.13
+  and Windows 3.12; no network or model downloads), a repo guard that fails CI if data,
+  weights or large files are tracked, and `.gitignore` hardened (`data/`, `*.tar`,
   `*.pt`, `*.pth`, `*.ckpt`, feature caches, `outputs/` except whitelisted small files).
 - `docs/PRIOR_WORK.md`: PatchCore (Roth et al., 2022), PaDiM (Defard et al., 2021),
   VisA/SPD (Zou et al., 2022), DINOv2 (Oquab et al., 2023), conformal prediction
@@ -81,11 +84,14 @@ Deliverables
   I will say so and cite it without describing its contents.
 - Skeleton for README (TL;DR, status, limitations placeholder) and
   `docs/INTERVIEW_NOTES.md`.
-- Optional, with your OK: read `selective-rag-abstention` (read-only) to mirror its
-  structure.
+- Mirror the structure of `selective-rag-abstention` (read-only): CI layout incl. a
+  Windows job, tests layout, README with TL;DR and honest limitations, ROADMAP style.
 
-Tests: package imports, CI runs green.
-**Effort:** ~1 session. **You do locally:** nothing (optionally `pip install -e .[cpu,dev]`
+Done so far: everything above. arXiv:2608.15090 and arXiv:2608.18585 could **not** be read,
+because arxiv.org is blocked by the cloud network policy; both are cited by title only.
+Tests: package imports, stable per-item seeds (across processes), repo guard rules,
+`.gitignore` coverage. 34 offline tests.
+**Effort (rough guess):** ~1 session. **You do locally:** nothing (optionally `pip install -e .[cpu,dev]`
 and run `pytest` to check that it works on Windows).
 
 ---
@@ -99,12 +105,20 @@ Deliverables
 - `anomcal.data.visa`: parse `split_csv/1cls.csv`, image and mask loading, a
   per-class index with stable `image_id`s.
 - `anomcal.data.splits`: seeded split into memory-bank and held-out pool, plus a CPU
-  sampler for calibration/test partitions. `docs/SPLIT_PROTOCOL.md` documents it.
-- `anomcal.corruptions`: 4 corruptions × 3 severities, deterministic, pure numpy/PIL.
-- `scripts/extract_scores.py`: CLI (`--data-root`, `--classes`, `--methods`, `--seeds`,
-  `--device`, `--batch-size`, `--max-images`, `--out`), resumable (one finished
-  (class, method, seed, corruption) chunk = one file, skipped if already present),
-  tqdm progress bar, writes the documented schema. A **dummy scorer** stands in for
+  sampler for calibration/test partitions. `docs/SPLIT_PROTOCOL.md` documents it, and
+  says which reported numbers use the official split and which use ours. Memory bank
+  and held-out pool are **strictly disjoint**, enforced by a unit test that fails on
+  any overlap.
+- `anomcal.corruptions`: 4 corruptions × N severities (N = 3 by default, set by config
+  and the `--severities` flag), deterministic, pure numpy/PIL. Severity parameters
+  are stored in `run_meta.json`.
+- `scripts/extract_scores.py`: CLI (`--data-root` (required, no default path),
+  `--classes`, `--methods`, `--seeds`, `--severities`, `--device`, `--batch-size`,
+  `--num-workers` (default 0, which is safe on Windows), `--max-images`, `--out`).
+  Resumable after interruption (one finished (class, method, seed, corruption) chunk =
+  one file, written atomically and skipped if already present). tqdm progress bar.
+  **Prints an estimated runtime before the full run** (from a short timed warm-up).
+  Writes the documented schema. `pathlib` everywhere, no hard-coded POSIX paths. A **dummy scorer** stands in for
   the models so the whole pipeline is tested end to end.
 - A tiny **fake VisA** generator (same folder and CSV layout, synthetic images and
   masks) for tests and CI.
@@ -113,12 +127,13 @@ Deliverables
   The cache is git-ignored.
 - `docs/score_schema.md`.
 
-Tests: split disjointness (leakage tests on `image_id` and file path), seed
+Tests: split disjointness (memory bank ∩ held-out pool = ∅ and calibration ∩ test = ∅,
+on `image_id` and on resolved file path), seed
 determinism, corruption determinism and severity monotonicity (for example, PSNR
 decreases as severity increases), identity at severity 0, script resumability
 (interrupt, then rerun produces identical output), schema validation, and the
 `--max-images` behaviour.
-**Effort:** ~2 sessions. **You do locally:** untar VisA to `data/visa/`, run
+**Effort (rough guess):** ~2 sessions. **You do locally:** untar VisA to `data/visa/`, run
 `python scripts/extract_scores.py --methods dummy --max-images 20` as a smoke test of
 data loading on the real files, and report any errors (no results are pushed yet).
 
@@ -129,22 +144,27 @@ data loading on the real files, and report any errors (no results are pushed yet
 **Goal:** real scores for 3 methods × 3 seeds × (clean + 12 shifted conditions).
 
 Deliverables
-- `anomcal.models`: baseline (global features + kNN), PatchCore (coreset, patch kNN,
-  anomaly maps), DINOv2-kNN (patch tokens + kNN, anomaly maps). Each has a CPU unit
+- `anomcal.models`: baseline (global features + kNN), PatchCore (torch greedy coreset
+  with seeded random projection, configurable memory-bank size, chunked
+  `torch.cdist`/matmul kNN on GPU with CPU fallback, anomaly maps), DINOv2-kNN (patch tokens + kNN, anomaly maps). Each has a CPU unit
   test with a tiny random backbone, so CI never downloads weights.
 - `anomcal.metrics`: image AUROC, pixel AUROC, PRO (integrated up to FPR 0.3), FAR,
   TPR at threshold. Tested against hand-computed cases and `sklearn`.
 - Memory plan for 6 GB VRAM: fp16 backbones, batch size auto-reduced on OOM, coreset
   computed in chunks, kNN via chunked `torch.cdist`.
-- Laptop run in three stages: (a) `--max-images 20` smoke test to measure throughput
-  and update the compute estimate in this file, (b) one full class, (c) all classes.
+- Laptop run in three stages: (a) `--max-images 20` smoke test to measure throughput.
+  **The rough laptop-time guesses in this file are then replaced with the measured
+  numbers.** (b) One full class. (c) All classes.
 - Commit `results/scores/*.parquet` (expected to be a few MB in total) plus
   `run_meta.json`.
-- Sanity check: image AUROC on the official split, compared with published VisA
-  numbers from the literature (cited). If we are far off, that is investigated
-  before moving on.
+- `docs/PATCHCORE_DESIGN.md` (and a section per method): backbone, layers, patch
+  aggregation, coreset ratio / memory-bank size, image size, and why each was chosen.
+- Sanity check **in the README**: our per-class image AUROC on the official split next
+  to published PatchCore numbers on VisA where available (cited from primary sources).
+  Large discrepancies are flagged honestly, not hidden, and investigated before moving
+  on. Optional: an anomalib PatchCore run as a separate cross-check.
 
-**Effort:** ~2–3 sessions + laptop compute (rough guess: several hours in total,
+**Effort (rough guess):** ~2–3 sessions + laptop compute (several hours in total,
 splittable over nights thanks to resumability; measured in stage (a)).
 **You do locally:** run stages (a)–(c), push the score files, and report the
 throughput and any OOMs.
@@ -160,17 +180,21 @@ Deliverables
   finite-sample FAR guarantee `α − 1/(n+1) ≤ E[FAR] ≤ α` (the lower bound holds
   without ties). Hand-written and explained line by line.
 - An evaluation over R = 100 random calibration/test partitions per (class, method,
-  seed): mean and std of FAR vs alpha, distribution of FAR (it follows a
-  Beta-binomial law, and we check against it), and TPR at threshold. A comparison
+  seed). Reported **per class**, not only on average: mean and std of FAR vs alpha,
+  the **histogram of per-calibration-set FAR plotted next to the theoretical
+  Beta(n+1−k, k) law** (Beta-binomial for a finite test set), and TPR at the threshold.
+- The PAC variant (`P(FAR ≤ α) ≥ 1 − δ`) next to the marginal one. A comparison
   with a naive threshold (the empirical (1−α) quantile without the +1 correction)
   shows why the correction matters.
 - Results table and figures in `results/`, README section, and the math in
   `docs/INTERVIEW_NOTES.md`.
 
-Tests: on synthetic exchangeable scores, the average FAR lies within the theoretical
-bounds (a statistical test with fixed seeds and tolerances); edge cases (n < 1/α − 1,
+Tests (in CI): on a synthetic score distribution with exchangeable scores, the
+guarantee must hold. The average FAR lies within [α − 1/(n+1), α] up to a fixed-seed
+Monte-Carlo tolerance, and the FAR histogram matches the Beta law (KS test); `k` is
+computed with exact rational arithmetic; edge cases (n < 1/α − 1,
 ties, alpha = 0/1 rejected); no calibration image appears in the test set.
-**Effort:** ~1–2 sessions. **You do locally:** nothing.
+**Effort (rough guess):** ~1–2 sessions. **You do locally:** nothing.
 
 ---
 
@@ -193,7 +217,7 @@ Deliverables
 
 Tests: synthetic location-shift scenario where the expected FAR drift is known
 analytically; recalibration restores FAR on synthetic shifted data; sets are disjoint.
-**Effort:** ~2 sessions. **You do locally:** nothing (unless we decide to add
+**Effort (rough guess):** ~2 sessions. **You do locally:** nothing (unless we decide to add
 severities or corruptions, which would mean a resumable re-run of extraction only
 for the new conditions).
 
@@ -211,7 +235,7 @@ Deliverables
   split into cloud/CPU and laptop/GPU) and a complete `docs/INTERVIEW_NOTES.md`.
 - Optional: PaDiM, if time permits (this would need another laptop run).
 
-**Effort:** ~2 sessions. **You do locally:** optionally render thumbnails of failure
+**Effort (rough guess):** ~2 sessions. **You do locally:** optionally render thumbnails of failure
 cases and review the figures.
 
 ---
