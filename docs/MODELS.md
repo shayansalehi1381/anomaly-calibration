@@ -63,9 +63,9 @@ the same set as the exact version.
 | input size | 224 px → 16 × 16 patch tokens (CLS dropped), 384-d | must be divisible by 14; timm resamples the position embeddings (trained at 518 px) |
 | distance | cosine distance on L2-normalised tokens, computed as `||a−b||²/2` | lets us reuse the exact kNN (for unit vectors, 1 − cos = ||a−b||²/2) |
 | memory bank | all memory patches (no coreset) | 905 × 256 × 384 floats = 339 MB at most |
-| image score | mean of the top 1% patch distances (≥ 1 patch) | AnomalyDINO's aggregation; a bit more robust than a single max |
+| image score | mean of the top 1% patch distances (≥ 1 patch; 3 of 256 at 224 px) | intended to follow AnomalyDINO's aggregation, but **unverified**: we could not read the paper from our environment |
 | map | 16 × 16 → 256 × 256, Gaussian σ = 4 | as PatchCore |
-| not done | AnomalyDINO's background masking and 448/672 px inputs | listed as limitations / possible increases |
+| not done | AnomalyDINO's zero-shot masking; higher input resolution (the resolution AnomalyDINO/SPARC used is **unverified** by us) | listed as limitations / possible increases |
 
 ## 4. Memory budget for 6 GB VRAM (arithmetic from tensor shapes, not measured)
 
@@ -102,3 +102,15 @@ smaller `batch_size`, `coreset_ratio`.
 
 **Not testable in the cloud:** the pretrained weights (download.pytorch.org and
 huggingface.co are blocked there) and real GPU timings. The laptop smoke test covers both.
+
+## 6. Measured outcome and known limitation (after the full run)
+
+Measured clean image AUROC on the official split (class mean, 3 seeds; full tables in
+`docs/RESULTS_EXTRACTION.md`): baseline 80.4, DINOv2-kNN 89.6, PatchCore 90.0. Against
+SPARC's VisA reference numbers (different preprocessing), PatchCore is 4.3 points lower
+and DINOv2-kNN is 5.7 points lower than AnomalyDINO. **The DINOv2 gap is a known
+limitation that we have not explained.** Input resolution (224 px), the top-1%
+aggregation, square resizing vs center crop, and the missing masking are hypotheses
+only. An optional, cheap one-class check at 448 px is described in
+`docs/RESULTS_EXTRACTION.md`. Both patch methods are weak on macaroni2 and capsules
+(PatchCore on macaroni2 is near chance).

@@ -221,6 +221,16 @@ Hence we report FAR *and* detection rate under every shift.
   huggingface.co are blocked there, so loading the *pretrained* WRN-50 / DINOv2 weights
   (including timm's position-embedding resampling to 224 px) is first exercised by the
   laptop smoke test.
+- Phase 2 results, **DINOv2-kNN gap not explained**: official-split image AUROC 89.6 vs
+  ~95.3 for AnomalyDINO in SPARC's table (−5.7 points). Hypotheses (resolution 224 px,
+  top-1% aggregation, square resize vs center crop, no masking) are untested. I had also
+  written AnomalyDINO details ("448/672 px", "mean of top 1%") into the docs **from
+  memory**. When I tried to verify them, the paper was unreachable, so they are now
+  marked unverified. Lesson: a design note citing a paper must be checked against the
+  paper, or labelled as recalled.
+- Phase 2 results, **weak classes**: macaroni2 (PatchCore near chance) and capsules. This
+  does not hurt the calibration study (thresholds use normal scores only); it lowers the
+  detection rate, which is reported per class.
 - Phase 1, **pandas 3 string dtype**: the schema validator compared dtype names
   (`"string"`), but pandas 3 reports `"str"` for ordinary string columns. Fix: check
   "is a string column" semantically, not by name.
