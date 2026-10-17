@@ -9,10 +9,13 @@ schema in `src/anomcal/scores_io.py`, enforced by `validate()` on every write an
 <out>/                                   default: outputs/extract  (git-ignored)
   full/                                  a full run   (or smoke_max<N>/ for --max-images N)
     fingerprint.json                     settings that must not change on resume
+    methods.json                         resolved settings per method (also fixed on resume)
     run_meta.json                        one entry per invocation (see below)
     splits/<protocol>/seed<s>/<class>.json         ids per role: the leakage audit trail
     chunks/<protocol>/<method>/seed<s>/<class>/<corruption>_s<level>.parquet
+    pixel_metrics/<protocol>/<method>/seed<s>/<class>.json   pixel AUROC / PRO (clean)
     scores/<protocol>_<method>_seed<s>.parquet     consolidated: what gets committed
+    scores/pixel_metrics.csv                       consolidated pixel metrics
 ```
 
 - A **chunk** holds the scores of one (protocol, method, seed, class, condition). It is
@@ -63,16 +66,35 @@ A list with one object per invocation, including interrupted ones:
 
 - `config`: every resolved option (after merging `--config` and CLI flags);
 - `fingerprint`: `memory_fraction`, `image_size`, `max_images`, `split_csv_sha256`;
+- `method_settings`: every resolved method setting (backbone, input size, coreset ratio, …);
 - `levels` and `severity_parameters`: the **exact corruption parameters** of each level used;
 - `environment`: Python, numpy, pandas, Pillow, SciPy (and torch / GPU name if present),
   platform, git commit, device;
-- `estimate`: the warm-up timings per image (load, each corruption, fit, score) and the
-  extrapolated total;
+- `estimate`: the warm-up timings per image (load, each corruption, fit, score), model
+  build times, warm-up peak VRAM per method and the extrapolated total;
+- `jobs` (Phase 2): one record per (class, protocol, seed, method) job with `n_memory`,
+  `n_eval`, `conditions`, `seconds` (`load`, `corrupt`, `build_model`, `fit`, `score`,
+  `pixel_metrics`, `total`) and `scorer` (settings, timings such as `fit_features` /
+  `fit_coreset`, `bank_size`, `peak_vram_mb`, `oom_backoffs`). These records feed
+  `scripts/estimate_full_run.py`;
 - `status` (`complete`, `interrupted`, `estimate only`, `nothing to do`),
   `chunks_written`, `elapsed_seconds`, and the paths of the consolidated files.
 
 ## Pixel-level outputs (Phase 2)
 
-Methods that produce anomaly maps will compute pixel AUROC / PRO on the laptop, for
-clean images only. They write a small JSON next to the scores; the maps themselves are
-never saved. That schema is added here in Phase 2.
+Methods with anomaly maps (PatchCore, DINOv2-kNN; not the baseline) compute pixel
+metrics on the laptop, for **clean** images, by default only in the `official` protocol
+(`--pixel-metrics-protocols official calib` adds ours). The 256 × 256 maps are compared
+with the binarised masks (resized with nearest neighbour), and then discarded: they are
+never saved. One JSON per job, consolidated into `scores/pixel_metrics.csv`:
+
+| column | meaning |
+|---|---|
+| `protocol`, `method`, `seed`, `class` | as in the score files |
+| `n_images`, `n_anomalous` | evaluation images (normal + anomalous) and how many have defects |
+| `map_size` | resolution the metrics were computed at (256) |
+| `pixel_auroc` | AUROC over all pixels of all evaluation images |
+| `pro_auc_0.3` | area under the per-region-overlap curve up to FPR 0.3, normalised to [0, 1] (8-connected regions) |
+
+The chunk of the clean condition is written *after* its pixel-metric JSON, so on resume
+an existing clean chunk always comes with its pixel metrics.
