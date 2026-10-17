@@ -252,30 +252,28 @@ ties, alpha = 0/1 rejected); no calibration image appears in the test set.
 
 ---
 
-## Phase 4: Distribution-shift evaluation and recalibration (CPU) ☐
+## Phase 4: Distribution-shift evaluation and recalibration (CPU) ☑ (results in results/phase4/, README §Results)
 
 **Goal:** the core research question.
 
-Deliverables
-- FAR drift: calibrate on clean normals, evaluate on corrupted test normals, per
-  (method, class, corruption, severity). Also report TPR on corrupted anomalies,
-  so the trade-off between "fewer false alarms" and "detects nothing" is visible.
-- A stability summary per method (for example, mean |FAR − α| across shifts and the
-  worst case), with seed std.
-- Mitigation: recalibrate on m shifted normal images (m ∈ {10, 25, 50, 100}, disjoint
-  from the shifted test set), and measure how much of the guarantee is restored.
-  Both thresholds are recalibrated (split conformal and Deng's tolerance limit).
-  Honest note up front: with m < 99, alpha = 1% cannot be certified by split conformal
-  at all (the threshold becomes +∞; α_min = 1/(m+1)), and the tolerance limit needs
-  m ≥ 299 at δ = 5%. That is a result to report, not to hide.
-- Optional (only if time permits): a simple score-shift detector (for example, a
-  conformal test on a batch of normal scores) to *flag* when recalibration is needed.
+Done (`anomcal.phase4`, `tests/test_phase4.py`; run with `python -m anomcal.phase4`)
+- Setting A (clean-calibrated threshold on corrupted test normals) and Setting B
+  (threshold from corrupted calibration normals, same corruption and severity), for split
+  conformal and the tolerance limit (δ = 5%) at α ∈ {1, 5, 10}%, over 108 experiments ×
+  12 conditions × 100 partitions. Reported: FAR and excess FAR, violation rate, TPR on
+  corrupted anomalies, spread across classes and seeds, stability ranking, per-class
+  tables, and class-bootstrap intervals. Two figures.
+- Result in one line: under our synthetic corruptions, A breaks the target almost
+  everywhere (DINOv2-kNN least), B restores it exactly but the detectors lose most of their
+  detection power.
 
-Tests: synthetic location-shift scenario where the expected FAR drift is known
-analytically; recalibration restores FAR on synthetic shifted data; sets are disjoint.
-**Effort (rough guess):** ~2 sessions. **You do locally:** nothing (unless we decide to add
-severities or corruptions, which would mean a resumable re-run of extraction only
-for the new conditions).
+Not done (kept as the optional / follow-up part of the original plan)
+- Recalibration on a **small** shifted normal set (m ∈ {10, 25, 50, 100}). Setting B here
+  uses the full calibration half (138–277 images), so it is the best case. With m < 99,
+  α = 1% is not certifiable by split conformal at all (α_min = 1/(m+1)), and the tolerance
+  limit needs m ≥ 299; this is the natural next experiment.
+- Mismatched severity (calibrate at severity s, test at s′): skipped on request.
+- A score-shift detector to flag when recalibration is needed.
 
 ---
 
