@@ -1,23 +1,48 @@
 """Anomaly scorers behind one small interface (see :mod:`anomcal.scorers.base`).
 
-Phase 1 ships only ``dummy`` (CPU, no torch) so the whole extraction pipeline can be
-tested end to end. Phase 2 adds ``baseline``, ``patchcore`` and ``dinov2_knn``; they
-are imported lazily so that the CPU-only install never needs torch.
+- ``dummy``: CPU, no torch; pixel-space 1-NN, only for testing the pipeline.
+- ``baseline``: global WRN-50 features + kNN distance (no maps).
+- ``patchcore``: our lean PatchCore (patch memory bank + greedy coreset), with maps.
+- ``dinov2_knn``: DINOv2 patch tokens + cosine kNN (AnomalyDINO-style), with maps.
+
+The torch-based methods are imported lazily, so the CPU-only install never needs torch.
 """
 
 from __future__ import annotations
 
-from anomcal.scorers.base import Scorer, ScorerConfig
-from anomcal.scorers.dummy import DummyScorer
+from importlib import import_module
 
-_REGISTRY = {"dummy": DummyScorer}
-AVAILABLE_METHODS = tuple(_REGISTRY)
+from anomcal.scorers.base import Scorer, ScorerConfig
+from anomcal.scorers.settings import SETTINGS, resolve_settings, settings_dict
+
+_IMPLEMENTATIONS = {
+    "dummy": "anomcal.scorers.dummy:DummyScorer",
+    "baseline": "anomcal.scorers.baseline:BaselineScorer",
+    "patchcore": "anomcal.scorers.patchcore:PatchCoreScorer",
+    "dinov2_knn": "anomcal.scorers.dinov2_knn:Dinov2KnnScorer",
+}
+AVAILABLE_METHODS = tuple(_IMPLEMENTATIONS)
+TORCH_METHODS = ("baseline", "patchcore", "dinov2_knn")
+assert set(SETTINGS) == set(_IMPLEMENTATIONS)
 
 
 def build_scorer(name: str, config: ScorerConfig) -> Scorer:
-    if name not in _REGISTRY:
+    if name not in _IMPLEMENTATIONS:
         raise KeyError(f"unknown method {name!r}; available: {AVAILABLE_METHODS}")
-    return _REGISTRY[name](config)
+    module, cls = _IMPLEMENTATIONS[name].split(":")
+    try:
+        impl = getattr(import_module(module), cls)
+    except ImportError as e:
+        raise RuntimeError(f"method {name!r} needs torch: pip install -e .[gpu] ({e})") from e
+    return impl(config)
 
 
-__all__ = ["AVAILABLE_METHODS", "Scorer", "ScorerConfig", "build_scorer"]
+__all__ = [
+    "AVAILABLE_METHODS",
+    "TORCH_METHODS",
+    "Scorer",
+    "ScorerConfig",
+    "build_scorer",
+    "resolve_settings",
+    "settings_dict",
+]

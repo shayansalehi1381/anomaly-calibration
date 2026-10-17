@@ -12,6 +12,7 @@ from __future__ import annotations
 import numpy as np
 
 from anomcal.scorers.base import ScorerConfig
+from anomcal.scorers.settings import resolve_settings
 
 THUMB = 16
 
@@ -31,20 +32,22 @@ def thumbnails(images: np.ndarray, size: int = THUMB) -> np.ndarray:
 
 class DummyScorer:
     name = "dummy"
+    produces_maps = False
 
     def __init__(self, config: ScorerConfig) -> None:
         self.config = config  # runs on CPU whatever config.device says
+        self.settings = resolve_settings("dummy", config.options)
         self._bank: np.ndarray | None = None
 
     def fit(self, images: np.ndarray) -> None:
         if len(images) == 0:
             raise ValueError("cannot fit on zero images")
-        self._bank = thumbnails(images)
+        self._bank = thumbnails(images, self.settings.thumbnail)
 
     def score(self, images: np.ndarray) -> np.ndarray:
         if self._bank is None:
             raise RuntimeError("call fit() before score()")
-        feats = thumbnails(images)
+        feats = thumbnails(images, self.settings.thumbnail)
         # Squared distances via |a|^2 - 2ab + |b|^2: one matrix product instead of a loop.
         # This form subtracts large, nearly equal numbers, so it is done in float64:
         # in float32 an image's distance to itself came out as ~0.7 instead of 0
@@ -56,5 +59,13 @@ class DummyScorer:
         )
         return np.sqrt(np.maximum(d2.min(axis=1), 0.0)).astype(np.float32)
 
+    def score_with_maps(self, images: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        raise NotImplementedError("the dummy scorer produces no anomaly maps")
+
     def describe(self) -> dict:
-        return {"method": self.name, "thumbnail": THUMB, "knn_k": 1, "device_used": "cpu"}
+        return {
+            "method": self.name,
+            "settings": {"thumbnail": self.settings.thumbnail},
+            "knn_k": 1,
+            "device_used": "cpu",
+        }

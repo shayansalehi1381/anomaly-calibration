@@ -24,7 +24,7 @@ dependencies = [
 plots = ["matplotlib>=3.8"]
 # Laptop only (feature extraction and scoring on the GPU). On Windows install the
 # CUDA build of torch first, see README "Runs on laptop with GPU".
-gpu = ["torch>=2.2", "torchvision>=0.17", "timm>=0.9"]
+gpu = ["torch>=2.4", "torchvision>=0.19", "timm>=1.0"]
 dev = ["pytest>=8.0", "ruff>=0.5"]
 
 [tool.setuptools.packages.find]

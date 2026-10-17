@@ -16,7 +16,13 @@ N_CONDITIONS_3 = 1 + 4 * 3  # clean + 4 families x 3 levels
 def cfg_for(root, out, **kw) -> ExtractConfig:
     # 64 px keeps the suite fast; the pipeline is resolution-agnostic.
     base = dict(
-        data_root=root, device="cpu", out_dir=out, seeds=[0], no_progress=True, image_size=64
+        data_root=root,
+        device="cpu",
+        out_dir=out,
+        seeds=[0],
+        no_progress=True,
+        image_size=64,
+        methods=["dummy"],
     )
     base.update(kw)
     return ExtractConfig(**base)
@@ -123,7 +129,18 @@ def test_cli_interrupt_returns_130(fake_visa_root, tmp_path, monkeypatch, capsys
         raise KeyboardInterrupt
 
     monkeypatch.setattr(ex, "run_job", crash)
-    rc = main(["--data-root", str(fake_visa_root), "--device", "cpu", "--out", str(tmp_path)])
+    rc = main(
+        [
+            "--data-root",
+            str(fake_visa_root),
+            "--device",
+            "cpu",
+            "--out",
+            str(tmp_path),
+            "--methods",
+            "dummy",
+        ]  # fmt: skip
+    )
     assert rc == 130 and "resume" in capsys.readouterr().out
 
 
@@ -165,7 +182,8 @@ def test_changed_settings_refuse_to_resume(fake_visa_root, tmp_path, capsys):
     run(cfg_for(fake_visa_root, tmp_path, classes=["candle"], protocols=["official"]))
     with pytest.raises(RuntimeError, match="mix two experiments"):
         run(cfg_for(fake_visa_root, tmp_path, classes=["candle"], memory_fraction=0.6))
-    args = ["--data-root", str(fake_visa_root), "--device", "cpu", "--out", str(tmp_path)]
+    args = ["--data-root", str(fake_visa_root), "--device", "cpu", "--out", str(tmp_path),
+            "--methods", "dummy"]  # fmt: skip
     assert main([*args, "--image-size", "128", "--classes", "candle"]) == 2
     assert "mix two experiments" in capsys.readouterr().err
 
@@ -225,9 +243,16 @@ def test_device_must_be_valid(fake_visa_root, tmp_path):
         run(cfg_for(fake_visa_root, tmp_path, device="gpu0"))
 
 
-@pytest.mark.skipif(importlib.util.find_spec("torch") is not None, reason="torch installed")
-def test_cuda_without_torch_is_an_error_not_a_silent_cpu_fallback(fake_visa_root, tmp_path):
-    with pytest.raises(RuntimeError, match="needs torch"):
+def test_cuda_without_cuda_is_an_error_not_a_silent_cpu_fallback(fake_visa_root, tmp_path):
+    if importlib.util.find_spec("torch") is None:
+        msg = "needs torch"
+    else:
+        import torch
+
+        if torch.cuda.is_available():
+            pytest.skip("CUDA is available here")
+        msg = "CUDA is not available"
+    with pytest.raises(RuntimeError, match=msg):
         run(cfg_for(fake_visa_root, tmp_path, device="cuda"))
 
 
@@ -279,7 +304,9 @@ def test_script_wrapper_runs(fake_visa_root, tmp_path, repo_root):
             "--no-progress",
             "--image-size",
             "64",
-        ],  # fmt: skip
+            "--methods",
+            "dummy",
+        ],
         capture_output=True,
         text=True,
     )
@@ -313,3 +340,82 @@ def test_each_image_is_decoded_once_per_run(fake_visa_root, tmp_path, monkeypatc
     assert len(loads) == n_images  # every image was needed by some job
     # each image once in the run, plus at most the 2 warm-up images a second time
     assert sum(loads.values()) <= n_images + cfg.warmup_images
+
+
+def test_parse_opts_and_cli_merge(fake_visa_root, tmp_path):
+    from anomcal.extract import parse_opts
+
+    assert parse_opts(["patchcore.coreset_ratio=0.05", "patchcore.amp=false", "x.y=abc"]) == {
+        "patchcore": {"coreset_ratio": 0.05, "amp": False},
+        "x": {"y": "abc"},
+    }
+    for bad in ("patchcore", "patchcore=1", ".k=1", "m.=1"):
+        with pytest.raises(SystemExit):
+            parse_opts([bad])
+    conf = tmp_path / "c.json"
+    conf.write_text(
+        json.dumps(
+            {
+                "data_root": str(fake_visa_root),
+                "device": "cpu",
+                "method_options": {"patchcore": {"coreset_ratio": 0.2, "embed_dim": 8}},
+            }
+        )
+    )
+    cfg = config_from_args(["--config", str(conf), "--opt", "patchcore.coreset_ratio=0.05"])
+    assert cfg.method_options == {"patchcore": {"coreset_ratio": 0.05, "embed_dim": 8}}
+
+
+def test_method_options_are_validated_before_any_work(fake_visa_root, tmp_path):
+    with pytest.raises(ValueError, match="unknown dummy option"):
+        run(cfg_for(fake_visa_root, tmp_path, method_options={"dummy": {"thumb": 8}}))
+    with pytest.raises(ValueError, match="not in this run"):
+        run(cfg_for(fake_visa_root, tmp_path, method_options={"patchcore": {"embed_dim": 8}}))
+    assert not (tmp_path / "full" / "chunks").exists()
+
+
+def test_changed_method_settings_refuse_to_resume(fake_visa_root, tmp_path):
+    kw = dict(classes=["candle"], protocols=["official"])
+    run(cfg_for(fake_visa_root, tmp_path, **kw))
+    with pytest.raises(RuntimeError, match="settings changed"):
+        run(cfg_for(fake_visa_root, tmp_path, method_options={"dummy": {"thumbnail": 8}}, **kw))
+
+
+def test_job_order_is_class_protocol_seed_method(fake_visa_root):
+    from anomcal.extract import plan_jobs
+
+    cfg = cfg_for(fake_visa_root, "unused", seeds=[0, 1], methods=["dummy", "baseline"])
+    jobs = plan_jobs(cfg, ["candle", "pcb1"])
+    keys = [(j.cls, j.protocol, j.seed, j.method) for j in jobs]
+    assert keys[:4] == [
+        ("candle", "calib", 0, "dummy"),
+        ("candle", "calib", 0, "baseline"),
+        ("candle", "calib", 1, "dummy"),
+        ("candle", "calib", 1, "baseline"),
+    ]
+
+
+def test_jobs_are_recorded_with_timings(full_run):
+    cfg, entry = full_run
+    jobs = entry["jobs"]
+    assert len(jobs) == 2 * 2  # 2 classes x 2 protocols (1 seed, 1 method)
+    j = jobs[0]
+    assert {"load", "corrupt", "build_model", "fit", "score", "total"} <= set(j["seconds"])
+    assert j["n_eval"] == 14 and j["scorer"]["method"] == "dummy"
+    meta = json.loads((cfg.run_dir / "run_meta.json").read_text())[-1]
+    assert len(meta["jobs"]) == 4 and meta["method_settings"]["dummy"] == {"thumbnail": 16}
+
+
+@pytest.mark.parametrize("name", ["gpu_smoke", "gpu_one_class", "full_run", "smoke_dummy"])
+def test_shipped_configs_are_valid(repo_root, name):
+    from anomcal.corruptions import levels_for_count
+    from anomcal.scorers import AVAILABLE_METHODS, settings_dict
+
+    cfg = config_from_args(["--config", str(repo_root / "configs" / f"{name}.json")])
+    assert set(cfg.methods) <= set(AVAILABLE_METHODS)
+    for m in cfg.methods:
+        settings_dict(m, cfg.method_options.get(m))
+    assert cfg.levels == levels_for_count(3)
+    if name == "gpu_one_class":  # its chunks must land in the same folder as the full run
+        full = config_from_args(["--config", str(repo_root / "configs" / "full_run.json")])
+        assert cfg.run_dir == full.run_dir and cfg.max_images is None

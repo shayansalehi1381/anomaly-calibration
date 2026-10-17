@@ -151,6 +151,22 @@ def _parse_row(row: Sequence[str], lineno: int) -> VisaRecord:
     )
 
 
+def records_from_counts(counts: dict[str, tuple[int, int, int]]) -> list[VisaRecord]:
+    """Synthetic records with given per-class counts (no files): lets planning and tests
+    use the real VisA split sizes without the dataset, e.g. in the cloud."""
+    recs = []
+    for cls, (n_tr, n_te, n_an) in counts.items():
+        for i in range(n_tr + n_te):
+            rel = f"{cls}/Data/Images/Normal/{i:04d}.JPG"
+            split = "train" if i < n_tr else "test"
+            recs.append(VisaRecord(make_image_id(cls, 0, rel), cls, split, 0, rel, None))
+        for i in range(n_an):
+            rel = f"{cls}/Data/Images/Anomaly/{i:03d}.JPG"
+            mask = f"{cls}/Data/Masks/Anomaly/{i:03d}.png"
+            recs.append(VisaRecord(make_image_id(cls, 1, rel), cls, "test", 1, rel, mask))
+    return recs
+
+
 def resolve_visa_root(data_root: Path) -> Path:
     """Accept either ``data/visa`` or ``data/visa/VisA`` (depends on how the tar was extracted).
 

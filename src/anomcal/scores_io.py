@@ -19,6 +19,7 @@ which is the small file that gets committed to ``results/scores/``.
 
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import Iterable
 from pathlib import Path
@@ -156,4 +157,51 @@ def consolidate(out_dir: Path, protocol: str, method: str, seed: int) -> Path | 
     df = read_scores(parts).sort_values(["class", "corruption", "severity", "image_id"])
     dest = Path(out_dir) / "scores" / f"{protocol}_{method}_seed{seed}.parquet"
     write_atomic(df.reset_index(drop=True), dest)
+    return dest
+
+
+# ----------------------------------------------------------------------------- pixel metrics
+# Anomaly maps are too large to keep, so pixel AUROC / PRO are computed on the laptop
+# for clean images and stored as one small JSON per (protocol, method, seed, class).
+
+PIXEL_COLUMNS = (
+    "protocol",
+    "method",
+    "seed",
+    "class",
+    "n_images",
+    "n_anomalous",
+    "map_size",
+    "pixel_auroc",
+    "pro_auc_0.3",
+)
+
+
+def pixel_metrics_path(out_dir: Path, protocol: str, method: str, seed: int, cls: str) -> Path:
+    return Path(out_dir) / "pixel_metrics" / protocol / method / f"seed{seed}" / f"{cls}.json"
+
+
+def write_json_atomic(data: dict, path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def consolidate_pixel_metrics(out_dir: Path) -> Path | None:
+    """All per-job pixel-metric JSON files -> one small CSV (committed with the scores)."""
+    files = sorted((Path(out_dir) / "pixel_metrics").glob("*/*/*/*.json"))
+    if not files:
+        return None
+    rows = [json.loads(f.read_text(encoding="utf-8")) for f in files]
+    df = pd.DataFrame(rows)
+    missing = set(PIXEL_COLUMNS) - set(df.columns)
+    if missing:
+        raise SchemaError(f"pixel-metric files lack {sorted(missing)}")
+    df = df[list(PIXEL_COLUMNS)].sort_values(["protocol", "method", "seed", "class"])
+    dest = Path(out_dir) / "scores" / "pixel_metrics.csv"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_name(dest.name + ".tmp")
+    df.to_csv(tmp, index=False)
+    os.replace(tmp, dest)
     return dest

@@ -1,7 +1,7 @@
 # Conformal False-Alarm Calibration for Industrial Anomaly Detection under Distribution Shift
 
 [![CI](https://github.com/shayansalehi1381/anomaly-calibration/actions/workflows/ci.yml/badge.svg)](https://github.com/shayansalehi1381/anomaly-calibration/actions/workflows/ci.yml)
-![tests](https://img.shields.io/badge/tests-206%20passed%20offline-brightgreen)
+![tests](https://img.shields.io/badge/tests-295%20passed%20offline-brightgreen)
 ![python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![license](https://img.shields.io/badge/license-MIT-lightgrey)
 
@@ -13,8 +13,8 @@ normal images only, which gives a finite-sample, distribution-free guarantee
 distribution shift** (illumination, blur, noise, JPEG) for three detectors on
 **VisA**: a feature-distance baseline, PatchCore and DINOv2-kNN.
 
-> **TL;DR: status: Phases 0–1 of 0–5 built (Phase 1 awaiting the laptop smoke test).
-> No experiments have been run yet, so this README contains no results.** Every number that appears here later will
+> **TL;DR: status: Phases 0–1 done; Phase 2 code done, laptop GPU run pending.
+> No experiments have been run on VisA yet, so this README contains no results.** Every number that appears here later will
 > come from a real run, with mean ± std over seeds. This is a reproduction plus
 > extension of existing work, not a novelty claim (see [Prior work](docs/PRIOR_WORK.md)).
 
@@ -83,8 +83,15 @@ n = 99 → 1%. The tolerance limit needs **m ≥ m_min = ⌈log δ / log(1 − �
 
 ## Method (planned)
 
-1. **Detectors**, fit on a memory bank of normal training images per class: a global-feature
-   kNN baseline, our own lean PatchCore (torch, no faiss) and DINOv2 patch-kNN.
+1. **Detectors**, fit on a memory bank of normal training images per class (design choices
+   in [docs/MODELS.md](docs/MODELS.md)):
+   - *baseline*: global WRN-50 features, distance to the nearest memory image;
+   - *PatchCore* (our lean torch implementation, no faiss): WRN-50 layer2+3 patch features,
+     a 10% greedy coreset, exact nearest-neighbour patch distance (float32 shortlist +
+     exact re-rank, after a float32 cancellation bug we hit in Phase 1), max over patches;
+   - *DINOv2-kNN*: DINOv2 ViT-S/14 patch tokens, cosine nearest neighbour, mean of the
+     top 1% patches.
+   Image AUROC, pixel AUROC and PRO (up to FPR 0.3) are computed by our own tested code.
 2. **Two thresholds** from held-out normal calibration images, strictly disjoint from the
    memory bank and from the test images: split conformal (marginal) and Deng's tolerance
    limit (PAC).
@@ -102,7 +109,9 @@ Details and justification: [ROADMAP.md](ROADMAP.md).
 
 *None yet.* The results tables (image AUROC on the official split and on our split,
 pixel AUROC/PRO, FAR vs α, detection rate, FAR drift under shift) will be added in
-Phases 2–5, each from a real run.
+Phases 2–5, each from a real run. The first table will put our official-split image
+AUROC next to SPARC's VisA numbers (PatchCore WRN-50 about 94.3, AnomalyDINO about 95.3;
+different preprocessing) as a **sanity check only**, with any large gap flagged.
 
 ## Limitations
 
@@ -132,6 +141,11 @@ Known up front; the list will grow as results come in.
   α = 1/(n+1), and the tolerance limit needs m ≥ ⌈log δ / log(1 − α)⌉. With 8 shifted
   normals, recalibration can certify at best α ≈ 11.1% (split conformal) or about 31%
   (tolerance limit, δ = 5%), so it **cannot** restore a 1% guarantee.
+- **Our PatchCore and DINOv2-kNN are lean re-implementations**, not the reference code:
+  PatchCore without the paper's score re-weighting and with a simplified channel pooling;
+  DINOv2-kNN at 224 px without AnomalyDINO's background masking. Details and reasons are in
+  [docs/MODELS.md](docs/MODELS.md). The pretrained weights cannot be downloaded in the cloud,
+  so real-weight behaviour is verified only by the laptop smoke test.
 - **Sanity-check numbers come from a different protocol.** SPARC's VisA AUROC uses resize +
   center crop; we resize the full image to a square at 256 px. Small gaps are expected and
   are not a claim; large gaps will be flagged and investigated.
@@ -157,13 +171,18 @@ score files with the same CPU install.
 
 Only feature extraction and scoring run here (`scripts/extract_scores.py`). The script is
 resumable (rerun the same command after an interruption), prints a runtime estimate
-before it starts, and has a `--max-images` smoke-test mode.
-**Step-by-step Windows guide for the Phase 1 smoke test: [docs/LAPTOP_SMOKE_TEST.md](docs/LAPTOP_SMOKE_TEST.md).**
+before it starts, has a `--max-images` smoke-test mode, halves its batch on GPU
+out-of-memory, and records per-job timings and peak VRAM.
+
+- Dataset and CPU smoke test (Phase 1): [docs/LAPTOP_SMOKE_TEST.md](docs/LAPTOP_SMOKE_TEST.md)
+- **CUDA install, GPU smoke test, one-class measurement, full run (Phase 2):
+  [docs/LAPTOP_GPU_RUN.md](docs/LAPTOP_GPU_RUN.md)**
 
 ```powershell
-# 1. CUDA build of torch first (pick the CUDA version matching your driver)
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+# 1. CUDA build of torch (cu126 or cu130, depending on `nvidia-smi`; see LAPTOP_GPU_RUN.md)
+pip install torch==2.14.1 torchvision==0.29.1 --index-url https://download.pytorch.org/whl/cu126
 # 2. this package with the GPU extra
+pip install timm==1.0.30
 pip install -e ".[gpu,plots,dev]"
 # 3. VisA stays local: extract VisA_20220922.tar to data\visa\ (git-ignored)
 ```
@@ -171,11 +190,14 @@ pip install -e ".[gpu,plots,dev]"
 ```powershell
 # verify the local VisA copy against the official per-class counts
 python -m anomcal.data.visa --data-root data\visa
-# smoke test (Phase 1: CPU dummy scorer; real methods arrive in Phase 2)
-python scripts\extract_scores.py --data-root data\visa --device cpu `
-    --methods dummy --classes candle --max-images 20
-# print only the runtime estimate of a run
-python scripts\extract_scores.py --data-root data\visa --device cpu --methods dummy --estimate-only
+# GPU smoke test: class cashew, <= 20 images per role, all 3 methods
+python scripts\extract_scores.py --config configs\gpu_smoke.json
+# warm-up runtime estimate of the full run (scores nothing)
+python scripts\extract_scores.py --config configs\full_run.json --estimate-only
+# after one full-size class: predicted time and peak VRAM of the whole run
+python scripts\estimate_full_run.py --run-dir outputs\extract\full
+# clean image AUROC tables + sanity check against the SPARC VisA numbers
+python scripts\auroc_table.py outputs\extract\full\scores
 ```
 
 Output layout and columns: [docs/score_schema.md](docs/score_schema.md). Split protocol and
@@ -185,7 +207,7 @@ Try the full pipeline anywhere, without VisA, on a tiny synthetic stand-in:
 
 ```bash
 python -m anomcal.data.fake_visa outputs/fake_visa
-python scripts/extract_scores.py --data-root outputs/fake_visa --device cpu --seeds 0
+python scripts/extract_scores.py --data-root outputs/fake_visa --device cpu --seeds 0 --methods dummy
 ```
 
 ## Project layout
@@ -194,20 +216,25 @@ python scripts/extract_scores.py --data-root outputs/fake_visa --device cpu --se
 src/anomcal/          library
   data/               VisA adapter, image loading, split protocol, fake VisA
   corruptions.py      deterministic ImageNet-C-style shifts
-  scorers/            scorer interface (+ dummy; real methods in Phase 2)
+  models/             torch utilities (exact kNN, greedy coreset, maps) and backbones
+  scorers/            baseline, PatchCore, DINOv2-kNN (+ dummy for tests), settings
+  metrics.py          image/pixel AUROC, PRO
   scores_io.py        score schema, atomic chunk files, consolidation
   extract.py          the laptop pipeline behind scripts/extract_scores.py
-scripts/              laptop-side entry points (extract_scores.py)
+  estimate.py         full-run time / VRAM extrapolation from measured jobs
+  report.py           AUROC tables + SPARC sanity check
+scripts/              extract_scores.py, estimate_full_run.py, auroc_table.py
 configs/              example JSON configs for extract_scores.py --config
 tests/                offline test suite (synthetic data only)
-docs/                 prior work, interview notes, split protocol, score schema
+docs/                 prior work, interview notes, split protocol, score schema,
+                      model design, laptop guides
 results/              committed small score files and figures (from Phase 2)
 data/                 VisA on the laptop only, git-ignored
 ```
 
 ## Roadmap
 
-See [ROADMAP.md](ROADMAP.md): six phases (0–5). Phase 0 (skeleton, CI, prior work) is done; Phase 1 (data, splits, corruptions, extraction script) is in review.
+See [ROADMAP.md](ROADMAP.md): six phases (0–5). Phases 0–1 are done; Phase 2 (models, metrics, laptop run) has its code in review and its GPU run pending.
 
 ## References
 
