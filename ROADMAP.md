@@ -39,9 +39,6 @@ measured numbers.
    reported for clean images only, and only for methods that produce maps (PatchCore,
    DINOv2-kNN; not the global-feature baseline).
 
-4. **A separate final phase for interview prep** (working rule 12), so it does not get
-   squeezed into the write-up phase.
-
 ---
 
 ## Key design decisions to settle early (proposed defaults)
@@ -61,7 +58,7 @@ measured numbers.
 
 ---
 
-## Phase 0: Skeleton, CI and prior work ◐ (in review)
+## Phase 0: Skeleton, CI and prior work ☑
 
 **Goal:** an empty but professional repository that CI keeps green from day one.
 
@@ -233,17 +230,18 @@ Deliverables
 - Final figures: FAR vs severity, a per-class heatmap, recalibration curves.
 - Final README (TL;DR, results tables with mean ± std, limitations, reproducibility
   split into cloud/CPU and laptop/GPU) and a complete `docs/INTERVIEW_NOTES.md`.
+- `notebooks/results.ipynb`: a lightweight **presentation-only** notebook. It only loads
+  the saved score and metric files and shows the final tables and figures: no heavy
+  computation, no GPU, runs on CPU in under a minute. It is committed **with its
+  outputs**, so it can be read on GitHub without running it. All real logic stays in
+  the tested package and scripts; the notebook only calls them. Figures are embedded
+  at modest resolution so the file stays under the repo guard's 5 MiB limit. CI
+  executes it headless on the committed result files (once they exist) to make sure
+  it still runs.
 - Optional: PaDiM, if time permits (this would need another laptop run).
 
 **Effort (rough guess):** ~2 sessions. **You do locally:** optionally render thumbnails of failure
 cases and review the figures.
-
----
-
-## Phase 6: Interview check ☐
-
-15 interview-style questions on the project (method, math, design decisions, failures),
-and feedback on your answers. **Effort:** 1 session.
 
 ---
 
