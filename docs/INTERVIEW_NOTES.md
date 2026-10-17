@@ -187,6 +187,10 @@ Hence we report FAR *and* detection rate under every shift.
 | D24 | Corrupted images are computed once per (class, protocol, seed) and shared by all methods (jobs ordered class → protocol → seed → method). | From the measured laptop costs: about 13 min instead of about 38 min of CPU time; ≤ 1.5 GB RAM. | 2 |
 | D25 | Full-run estimate = cost model fitted to one measured full-size class (`estimate_full_run.py`), not the warm-up alone. | A warm-up with 8 images cannot see the coreset's ~quadratic cost or the kNN's growth with the bank. | 2 |
 | D26 | CI installs CPU torch and runs the model tests with tiny seeded backbones; the real architectures are built with random weights. | Tests the method logic and real tensor shapes without downloading weights; pretrained loading is verified on the laptop. | 2 |
+| D27 | Phase 3: 50/50 calibration/test split of the held-out pool, R = 100 partitions per experiment, each seeded by (method, seed, class, r). | The convention from `SPLIT_PROTOCOL.md` (n_cal = 138–277); 100 partitions show the per-partition spread, not just a mean. | 3 |
+| D28 | "not_certifiable" is a status with no threshold, never a clamped maximum score. | A clamped threshold would claim a guarantee it does not have. | 3 |
+| D29 | Goodness of fit with a simulated KS p-value against the exact discrete Beta-binomial law. | The textbook KS p-value assumes a continuous distribution; false-alarm counts are discrete. | 3 |
+| D30 | Report the cross-split check (train-normal calibration vs official-test normals) separately. | It is the only clean-data test that can actually fail: it probes exchangeability between VisA's two collections. | 3 |
 
 ## 5. What failed and why
 
@@ -237,4 +241,41 @@ Hence we report FAR *and* detection rate under every shift.
 
 ## 6. Results to be able to explain
 
-*(pending: Phase 2 onwards.)*
+### Phase 2 (detector accuracy, clean; measured)
+Official-split image AUROC, class mean: baseline 80.4, DINOv2-kNN 89.6, PatchCore 90.0.
+Weak classes: macaroni2 and capsules. DINOv2 is 5.7 points below the AnomalyDINO
+reference; the cause is unexplained. Details: `docs/RESULTS_EXTRACTION.md`.
+
+### Phase 3 (calibration on clean scores; measured)
+- 108 experiments (3 methods × 3 seeds × 12 classes) × 100 random 50/50 partitions of the
+  held-out normal pool (n_cal = 138–277). α ∈ {1%, 5%, 10%}; tolerance limit δ = 5%.
+- **Split conformal hits its targets**: pooled FAR 0.71–0.73% at α = 1%, 4.61–4.69% at 5%,
+  9.65–9.75% at 10%; the exact theory gives 0.71%, 4.58% and 9.61%.
+- **Tolerance limit**: 2.69–2.75% at α = 5% and 6.86–6.92% at 10% (more conservative, as
+  designed). It is **not certifiable at α = 1% in any class** (m_min = 299 > n_cal), and
+  that is reported as such.
+- **Why the clean result is "expected"**: for random splits of a fixed pool, the false-alarm
+  count depends only on ranks, so it is exactly Beta-binomial(m, n+1−k, k) for any detector.
+  Phase 3 therefore validates the implementation. A good interview answer: "On clean data
+  the guarantee is a theorem; I checked that my code reproduces the theorem, then I break
+  exchangeability on purpose in Phase 4."
+- **Per-partition noise**: with split conformal, the empirical FAR exceeds α in 29–45% of
+  partitions (theory 29–43%). This is not a violation: the guarantee is about the
+  *expected* FAR.
+- **Cross-split hint**: calibrating on train normals and testing on VisA's official test
+  normals gives a slightly higher FAR for DINOv2-kNN (11.4% at α = 10%, expected 9.9%).
+  This is a possible small natural shift between VisA's train and test normals, and it is
+  not conclusive.
+- **Detection power** depends on the detector, not on the calibration: PatchCore at
+  α = 5% catches 95.5% of chewinggum anomalies but 6.1% of macaroni2 anomalies.
+
+### What looked suspicious, and what I did about it
+- Goodness-of-fit rejections at α = 1%: 12 of 108 (11.1%). Over all 540 tests: 6.1%,
+  consistent with 5%. The same code rejects 4.0% on synthetic data where the law holds by
+  construction. The α = 1% excess is borderline and unexplained; I report it rather than
+  drop it.
+- The first version of the FAR figure plotted the tolerance limit's α = 5% point above
+  "α = 1%". I found it by looking at the rendered image, fixed it, and added a regression
+  test.
+- `run_meta.json` from the laptop run was not committed, so the exact run provenance is
+  only on the laptop (follow-up).
