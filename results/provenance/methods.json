@@ -1,0 +1,34 @@
+{
+  "baseline": {
+    "amp": true,
+    "backbone": "wide_resnet50_2",
+    "image_size": 224,
+    "knn_k": 1,
+    "pretrained": true
+  },
+  "dinov2_knn": {
+    "amp": true,
+    "backbone": "vit_small_patch14_dinov2.lvd142m",
+    "chunk_elems": 67108864,
+    "coreset_ratio": 1.0,
+    "image_size": 224,
+    "map_sigma": 4.0,
+    "n_candidates": 8,
+    "pretrained": true,
+    "proj_dim": 128,
+    "top_fraction": 0.01
+  },
+  "patchcore": {
+    "amp": true,
+    "backbone": "wide_resnet50_2",
+    "chunk_elems": 67108864,
+    "coreset_ratio": 0.1,
+    "embed_dim": 1024,
+    "image_size": 224,
+    "map_sigma": 4.0,
+    "n_candidates": 8,
+    "neighbourhood": 3,
+    "pretrained": true,
+    "proj_dim": 128
+  }
+}

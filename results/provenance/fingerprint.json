@@ -1,0 +1,6 @@
+{
+  "memory_fraction": 0.5,
+  "image_size": 256,
+  "max_images": null,
+  "split_csv_sha256": "a48557e6033318cb90556f706196bc9d247a776a23ea51aecee5a80dd0332995"
+}
