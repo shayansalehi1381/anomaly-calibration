@@ -5,7 +5,7 @@ import pandas as pd
 from scipy import stats
 
 from anomcal.calibration import conformal_threshold, tolerance_threshold
-from anomcal.phase4 import class_bootstrap, main, rank_for, run_all, run_condition
+from anomcal.phase4 import class_bootstrap, main, plot_x, rank_for, run_all, run_condition
 from anomcal.scores_io import make_frame
 
 
@@ -76,7 +76,11 @@ def _synthetic_scores(classes=("a", "b"), methods=("good", "weak"), seeds=(0, 1)
                 rng = np.random.default_rng(10 * seed + ci + len(method))
                 ids = [f"{cls}/normal/{i:03d}" for i in range(120)]
                 ids_a = [f"{cls}/anomaly/{i:03d}" for i in range(15)]
-                for corr, sev, shift in (("none", 0, 0.0), ("gaussian_noise", 1, 1.0)):
+                for corr, sev, shift in (
+                    ("none", 0, 0.0),
+                    ("gaussian_noise", -1, 0.4),
+                    ("gaussian_noise", 1, 1.0),
+                ):
                     scores = np.r_[rng.normal(shift, 1, 120), rng.normal(shift + 2, 1, 15)]
                     frames.append(make_frame(
                         image_ids=ids + ids_a, cls=cls, labels=[0] * 120 + [1] * 15,
@@ -100,6 +104,25 @@ def test_run_all_and_cli_write_small_outputs(tmp_path):
     assert main(["--scores", str(scores), "--out", str(out), "--partitions", "3", "--boot", "50",
                  "--no-figures"]) == 0  # fmt: skip
     hl = pd.read_csv(out / "headline.csv")
-    assert {"far", "far_lo", "far_hi", "excess", "worst_class"} <= set(hl.columns)
+    assert {"far", "far_lo", "far_hi", "excess", "worst_class", "level"} <= set(hl.columns)
+    # the mild level (severity -1) is analysed and drawn at x = 0.5, between clean and level 1
+    mild = hl[hl["severity"] == -1]
+    assert len(mild) > 0 and set(mild["level"]) == {0.5}
+    stab = pd.read_csv(out / "stability.csv")
+    assert set(stab["grid"]) == {"all", "1-3-5"}
     assert (out / "stability.csv").exists() and (out / "auroc_by_condition.csv").exists()
     assert all(f.stat().st_size < 5 * 2**20 for f in out.iterdir())
+
+
+def test_plot_x_puts_the_mild_level_between_clean_and_level_1():
+    assert [plot_x(v) for v in (0, -1, 1, 3, 5)] == [0.0, 0.5, 1.0, 3.0, 5.0]
+
+
+def test_mild_level_known_answer_shift():
+    """A mild shift d=0.3 raises the no-recalibration FAR a little; recalibration restores alpha."""
+    rng = np.random.default_rng(5)
+    clean, mild = rng.normal(0, 1, 20000), rng.normal(0.3, 1, 20000)
+    rows = run_condition(clean, mild, np.array([5.0]), ("m", 0, "c"), n_partitions=20)
+    a = _cell(rows, "A_no_recal", "conformal", 0.05)
+    expected = 1 - stats.norm.cdf(stats.norm.ppf(0.95) - 0.3)
+    assert abs(a["far_mean"] - expected) < 0.01 and 0.05 < a["far_mean"] < 0.5
